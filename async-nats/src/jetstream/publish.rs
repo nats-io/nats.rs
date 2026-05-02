@@ -28,4 +28,7 @@ pub struct PublishAck {
     /// True if the published message was determined to be a duplicate, false otherwise.
     #[serde(default)]
     pub duplicate: bool,
+    /// Used only when published against stream with counters enabled.
+    #[serde(default, rename = "val")]
+    pub value: Option<String>,
 }

@@ -20,7 +20,7 @@ use std::{env, fs};
 use std::{thread, time::Duration};
 
 use lazy_static::lazy_static;
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use serde_json::{self, Value};
 
@@ -181,7 +181,7 @@ impl<'a> IntoConfig<'a> for [&'a str; 3] {
 /// of configs for each replica
 pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
     let cfg = cfg.into_config();
-    let port = rand::thread_rng().gen_range(3000..50_000);
+    let port = rand::rng().random_range(3000..50_000);
     let ports = [port, port + 100, port + 200];
 
     let ports = ports
@@ -189,12 +189,12 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
         .map(|port| {
             let mut new_port = *port;
             while !is_port_available(new_port) || !is_port_available(new_port + 1) {
-                new_port = rand::thread_rng().gen_range(2000..50_000);
+                new_port = rand::rng().random_range(2000..50_000);
             }
             new_port
         })
         .collect::<Vec<usize>>();
-    let cluster = [port + 1, port + 101, port + 201];
+    let cluster = [ports[0] + 1, ports[1] + 1, ports[2] + 1];
 
     let s1 = run_cluster_node_with_port(
         cfg.0[0],
@@ -220,6 +220,10 @@ pub fn run_cluster<'a, C: IntoConfig<'a>>(cfg: C) -> Cluster {
         "cluster".to_string(),
         cluster[2],
     );
+
+    // Give the cluster a moment to establish routing and elect a leader.
+    thread::sleep(Duration::from_millis(2000));
+
     Cluster {
         servers: vec![s1, s2, s3],
     }
@@ -267,7 +271,12 @@ fn do_run(cfg: &str, port: Option<&str>, id: Option<String>) -> Inner {
         cmd.arg("-c").arg(cfg);
     }
 
-    let child = cmd.spawn().unwrap();
+    let child = cmd.spawn().unwrap_or_else(|e| panic!(
+        "'nats-server' command cannot be executed due to: '{}'. \
+        Please check that NATS server is installed. For more information please see: \
+        https://docs.nats.io/running-a-nats-service/introduction/installation#installing-via-a-package-manager",
+        e
+    ));
     Inner {
         port: port.map(ToString::to_string),
         cfg: cfg.to_string(),
@@ -346,7 +355,6 @@ pub fn run_basic_server() -> Server {
 #[cfg(test)]
 mod tests {
 
-    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_with_js() {
         use crate::run_cluster;
@@ -381,11 +389,10 @@ mod tests {
         jetstream.delete_stream("replicated").await.unwrap();
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn cluster_without_js() {
         use crate::run_cluster;
-        use futures::StreamExt;
+        use futures_util::StreamExt;
         let cluster = run_cluster("");
 
         let client = async_nats::connect(cluster.servers[0].client_url())

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod client {
-    use futures::stream::StreamExt;
+    use futures_util::stream::StreamExt;
 
     const SECRET_SEED: &str = "SUACH75SWCM5D2JMJM6EKLR2WDARVGZT4QC6LX3AGHSWOMVAKERABBBRWM";
 

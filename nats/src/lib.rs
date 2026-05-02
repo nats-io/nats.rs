@@ -13,8 +13,18 @@
 
 //! A Rust client for the NATS.io ecosystem.
 //!
-//! <div class="warning"> This is the old legacy client. It will not get new features or updates beyond critical security fixes.
-//! Use <a href="https://crates.io/crates/async-nats">async-nats</a> instead. </div>
+//! # Deprecated
+//!
+//! <div class="warning">
+//! <strong>This crate is deprecated.</strong> Use
+//! <a href="https://crates.io/crates/async-nats">async-nats</a> instead.
+//!
+//! This crate will only receive critical security fixes. No new features or bug fixes will be
+//! added.
+//!
+//! If you need to use the async client in a synchronous context, see the
+//! <a href="https://github.com/nats-io/nats.rs/tree/main/async-nats/examples">async-nats examples</a>.
+//! </div>
 //!
 //! `git clone https://github.com/nats-io/nats.rs`
 //!
@@ -194,6 +204,7 @@
 #![allow(clippy::all)]
 #![allow(warnings)]
 /// Async-enabled NATS client.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub mod asynk;
 
 mod auth_utils;
@@ -207,15 +218,19 @@ mod secure_wipe;
 mod subscription;
 
 /// Header constants and types.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub mod header;
 
 /// `JetStream` stream management and consumers.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub mod jetstream;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub mod kv;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub mod object_store;
 
 #[cfg(feature = "fault_injection")]
@@ -245,6 +260,7 @@ pub type ConnectionOptions = Options;
 #[deprecated(since = "0.17.0", note = "this has been moved to `header::HeaderMap`.")]
 pub type Headers = HeaderMap;
 
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use header::HeaderMap;
 
 use std::{
@@ -256,18 +272,25 @@ use std::{
 use lazy_static::lazy_static;
 use regex::Regex;
 
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use connector::{IntoServerList, ServerAddress};
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use jetstream::JetStreamOptions;
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use message::Message;
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use options::Options;
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use subscription::{Handler, Subscription};
 
 /// A re-export of the `rustls` crate used in this crate,
 /// for use in cases where manual client configurations
 /// must be provided using `Options::tls_client_config`.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use rustls;
 
 #[doc(hidden)]
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub use connect::ConnectInfo;
 
 use client::Client;
@@ -284,6 +307,7 @@ lazy_static! {
 
 /// Information sent by the server back to this client
 /// during initial connection, and possibly again later.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 #[allow(unused)]
 #[derive(Debug, Default, Clone)]
 pub struct ServerInfo {
@@ -350,6 +374,7 @@ impl ServerInfo {
 }
 
 /// A NATS connection.
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 #[derive(Clone, Debug)]
 pub struct Connection(pub(crate) Arc<Inner>);
 
@@ -365,6 +390,10 @@ impl Drop for Inner {
 }
 
 /// Connect to one or more NATS servers at the given URLs.
+///
+/// # Deprecated
+///
+/// This crate is deprecated. Use [`async-nats`](https://crates.io/crates/async-nats) instead.
 ///
 /// The [`IntoServerList`] trait allows to pass URLs in various different formats. Furthermore, if
 /// you need more control of the connection's parameters use [`Options::connect()`].
@@ -412,6 +441,7 @@ impl Drop for Inner {
 ///     Ok(())
 /// }
 /// ```
+#[deprecated(since = "0.26.0", note = "use the async-nats crate instead")]
 pub fn connect<I: IntoServerList>(nats_urls: I) -> io::Result<Connection> {
     Options::new().connect(nats_urls)
 }

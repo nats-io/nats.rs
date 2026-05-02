@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures_util::StreamExt;
 
 fn main() -> Result<(), async_nats::Error> {
     // Spawn a new runtime that will run on the current thread.

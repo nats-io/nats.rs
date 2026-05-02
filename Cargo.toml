@@ -3,8 +3,12 @@
 resolver = "2"
 
 members = [
-  "nats",
   "async-nats",
   "nats-server"
+]
+
+exclude = [
+  "nats",
+  "nats/nats_test_server"
 ]
 
