@@ -5,7 +5,7 @@ use futures::StreamExt;
 async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("nats://localhost:4222").await?;
     // NATS-DOC-START
-    // Subscribe to all weather updates
+    // Subscribe to all alarms
     let mut sub1 = client.subscribe("sensor.alarm.*").await?;
     tokio::spawn(async move {
         while let Some(msg) = sub1.next().await {
@@ -17,6 +17,7 @@ async fn main() -> Result<(), async_nats::Error> {
         }
     });
 
+    // Subscribe to the all critical
     let mut sub2 = client.subscribe("sensor.*.*.critical").await?;
     tokio::spawn(async move {
         while let Some(msg) = sub2.next().await {
@@ -28,6 +29,7 @@ async fn main() -> Result<(), async_nats::Error> {
         }
     });
 
+    // Subscribe to everything
     let mut sub3 = client.subscribe("sensor.>").await?;
     tokio::spawn(async move {
         while let Some(msg) = sub3.next().await {

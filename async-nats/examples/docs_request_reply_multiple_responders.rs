@@ -11,7 +11,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let client_a = client.clone();
     tokio::spawn(async move {
         while let Some(msg) = sub_a.next().await {
-            let response = format!("calculated result from A");
+            let response = "calculated result from A".to_string();
             if let Some(reply) = msg.reply {
                 client_a.publish(reply, response.into()).await.ok();
             }
