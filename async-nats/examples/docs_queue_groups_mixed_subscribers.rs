@@ -39,7 +39,6 @@ async fn main() -> Result<(), async_nats::Error> {
                 "[WORKER A] Processing: {}",
                 String::from_utf8_lossy(&msg.payload)
             );
-            process_order(&msg.payload);
         }
     });
 
@@ -50,7 +49,6 @@ async fn main() -> Result<(), async_nats::Error> {
                 "[WORKER B] Processing: {}",
                 String::from_utf8_lossy(&msg.payload)
             );
-            process_order(&msg.payload);
         }
     });
 
@@ -62,12 +60,4 @@ async fn main() -> Result<(), async_nats::Error> {
 
     sleep(Duration::from_millis(100)).await;
     Ok(())
-}
-
-fn update_metrics(_subject: &str) {
-    // Update metrics implementation
-}
-
-fn process_order(_data: &[u8]) {
-    // Process order implementation
 }
