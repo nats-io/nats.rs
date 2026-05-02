@@ -14,7 +14,7 @@ async fn main() -> Result<(), async_nats::Error> {
     }
 
     let new_worker = |client: async_nats::Client, id: String| async move {
-        let mut sub = client.queue_subscribe("tasks", "workers").await?;
+        let mut sub = client.queue_subscribe("tasks", "workers".to_string()).await?;
 
         let handle = tokio::spawn(async move {
             while let Some(msg) = sub.next().await {

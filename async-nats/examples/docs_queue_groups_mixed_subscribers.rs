@@ -32,7 +32,7 @@ async fn main() -> Result<(), async_nats::Error> {
     });
 
     // Workers in queue group - load balanced
-    let mut worker_a = client.queue_subscribe("orders.new", "workers").await?;
+    let mut worker_a = client.queue_subscribe("orders.new", "workers".to_string()).await?;
     tokio::spawn(async move {
         while let Some(msg) = worker_a.next().await {
             println!(
@@ -42,7 +42,7 @@ async fn main() -> Result<(), async_nats::Error> {
         }
     });
 
-    let mut worker_b = client.queue_subscribe("orders.new", "workers").await?;
+    let mut worker_b = client.queue_subscribe("orders.new", "workers".to_string()).await?;
     tokio::spawn(async move {
         while let Some(msg) = worker_b.next().await {
             println!(
