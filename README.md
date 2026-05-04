@@ -46,6 +46,8 @@ stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking chan
 
 Feature flags are Documented in `Cargo.toml` and can be viewed [here](https://docs.rs/crate/async-nats/latest/source/Cargo.toml.orig).
 
+---
+
 #### Client and Orbit
 
 NATS client functionality is split across two layers: the **core client**
@@ -89,11 +91,14 @@ opinionated abstractions without dragging the core API along for the ride.
 | Rust-idiomatic abstractions with no parity mandate |                     | ✅    |
 | Per-utility versioning, faster API churn allowed   |                     | ✅    |
 
-Rule of thumb: if it is a thin mapping of something `nats-server` already
-speaks and every official client must expose it, it belongs in core. If it
-is a pattern, helper, or abstraction layered on top, it belongs in Orbit.
+> **Rule of thumb:** if it is a thin mapping of something `nats-server`
+> already speaks and every official client must expose it, it belongs in
+> core. If it is a pattern, helper, or abstraction layered on top, it
+> belongs in Orbit.
 
-```
+##### Layering
+
+```text
    ┌──────────────────────────────────────────────────────┐
    │  Application code                                    │
    └──────────────┬───────────────────────────┬───────────┘
@@ -110,6 +115,8 @@ is a pattern, helper, or abstraction layered on top, it belongs in Orbit.
                                        │ nats-server │
                                        └─────────────┘
 ```
+
+---
 
 ### nats (deprecated)
 
