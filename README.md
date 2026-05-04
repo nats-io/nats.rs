@@ -19,7 +19,7 @@ with the NATS philosophy of simple, secure, and fast!
 
 ## Clients
 
-There are two clients available in two separate crates:
+There is a current, async client, and a deprecated one.
 
 ### async-nats
 
@@ -45,6 +45,24 @@ stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking chan
 #### Feature flags
 
 Feature flags are Documented in `Cargo.toml` and can be viewed [here](https://docs.rs/crate/async-nats/latest/source/Cargo.toml.orig).
+
+#### Client and Orbit
+
+Nowadays, clients are splitted between two pieces.
+
+- Core Client
+- Orbit
+
+####### Core client
+
+Provides API layer for nats-server Core NATS and JetStream.
+Focused on reliability, lightweigh, unopinionated, performance, simplicity.
+Promises parity across clients.
+
+###### Orbit
+
+Adds abstractions, opinionated APIs, features built on top of NATS, with modern APIs and per-api versioning allowing more flexible API changes.
+Can miss some parity items, or have language-specific additions.
 
 ### nats (deprecated)
 
