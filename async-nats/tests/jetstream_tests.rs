@@ -4275,6 +4275,57 @@ mod jetstream {
         assert!(info.config.allow_batch_publish);
     }
 
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn source_consumer_round_trip() {
+        use async_nats::jetstream::stream::{Source, StreamConsumerSource};
+
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        // Source stream + a durable consumer the aggregate will use.
+        jetstream
+            .create_stream(stream::Config {
+                name: "ORIGIN".to_string(),
+                subjects: vec!["origin.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let aggregate = jetstream
+            .create_stream(stream::Config {
+                name: "AGG".to_string(),
+                sources: Some(vec![Source {
+                    name: "ORIGIN".to_string(),
+                    consumer: Some(StreamConsumerSource::new("agg-consumer", "agg.deliver")),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let sources = aggregate.cached_info().config.sources.clone().unwrap();
+        let cs = sources[0].consumer.clone().unwrap();
+        assert_eq!(cs.name, "agg-consumer");
+        assert_eq!(cs.deliver_subject, "agg.deliver");
+
+        // Fresh fetch — confirm the server actually persisted `consumer`.
+        let mut fresh = jetstream.get_stream("AGG").await.unwrap();
+        let info = fresh.info().await.unwrap();
+        let cs = info.config.sources.clone().unwrap()[0]
+            .consumer
+            .clone()
+            .unwrap();
+        assert_eq!(cs.name, "agg-consumer");
+        assert_eq!(cs.deliver_subject, "agg.deliver");
+    }
+
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn message_with_ttl() {
