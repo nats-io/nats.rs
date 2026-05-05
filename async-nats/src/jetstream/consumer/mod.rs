@@ -485,6 +485,14 @@ pub enum AckPolicy {
     /// message is acknowledged. Useful for "batching" acknowledgment.
     #[serde(rename = "all")]
     All = 1,
+    /// Used by server-managed durable sourcing/mirroring consumers (ADR-60).
+    /// Behaves like [`AckPolicy::All`] but acknowledgements are driven by
+    /// flow-control responses from the receiving server.
+    // Discriminant `3` matches the server-side enum order (consumer.go:335).
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(rename = "flow_control")]
+    FlowControl = 3,
 }
 
 /// `ReplayPolicy` controls whether messages are sent to a consumer
