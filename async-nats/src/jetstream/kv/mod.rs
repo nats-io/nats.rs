@@ -100,7 +100,7 @@ const KV_OPERATION_DELETE: &str = "DEL";
 const KV_OPERATION_PURGE: &str = "PURGE";
 const KV_OPERATION_PUT: &str = "PUT";
 
-const NATS_ROLLUP: &str = "Nats-Rollup";
+use crate::header::NATS_ROLLUP;
 const ROLLUP_SUBJECT: &str = "sub";
 
 pub(crate) fn is_valid_bucket_name(bucket_name: &str) -> bool {
