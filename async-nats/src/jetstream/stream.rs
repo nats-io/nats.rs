@@ -1032,6 +1032,55 @@ impl<I> Stream<I> {
         }
     }
 
+    /// Reset a [Consumer]'s delivery state (ADR-60).
+    ///
+    /// `seq` semantics:
+    /// - `None` (or `Some(0)`): reset back to the consumer's ack floor.
+    ///   Pending and redelivered messages are cleared; the ack-floor stream
+    ///   sequence is left where it was.
+    /// - `Some(n)` with `n > 0`: ack-floor stream sequence is set to one
+    ///   below `n`; the next delivered message will have a stream sequence
+    ///   of at least `n`.
+    ///
+    /// Only valid on consumers with
+    /// [`DeliverPolicy::All`][crate::jetstream::consumer::DeliverPolicy::All],
+    /// [`DeliverPolicy::ByStartSequence`][crate::jetstream::consumer::DeliverPolicy::ByStartSequence],
+    /// or
+    /// [`DeliverPolicy::ByStartTime`][crate::jetstream::consumer::DeliverPolicy::ByStartTime].
+    /// For policies with a configured starting sequence/time, resets below
+    /// the configured start are rejected by the server.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.reset_consumer("processor", Some(42)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    pub async fn reset_consumer(
+        &self,
+        name: &str,
+        seq: Option<u64>,
+    ) -> Result<ConsumerResetResponse, ConsumerError> {
+        let subject = format!("CONSUMER.RESET.{}.{}", self.name, name);
+        let payload = ConsumerResetRequest {
+            seq: seq.unwrap_or(0),
+        };
+
+        match self.context.request(subject, &payload).await? {
+            Response::Ok::<ConsumerResetResponse>(resp) => Ok(resp),
+            Response::Err { error } => Err(error.into()),
+        }
+    }
+
     /// Lists names of all consumers for current stream.
     ///
     /// # Examples
@@ -1616,6 +1665,28 @@ pub struct PauseResponse {
 struct PauseResumeConsumerRequest {
     #[serde(with = "rfc3339::option", skip_serializing_if = "Option::is_none")]
     pause_until: Option<OffsetDateTime>,
+}
+
+#[cfg(feature = "server_2_14")]
+#[derive(Serialize, Debug)]
+pub(crate) struct ConsumerResetRequest {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub(crate) seq: u64,
+}
+
+/// Response from a [`Stream::reset_consumer`] / [`crate::jetstream::consumer::Consumer::reset`] call.
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConsumerResetResponse {
+    /// Refreshed [Info][crate::jetstream::consumer::Info] for the consumer
+    /// after the reset has been applied.
+    #[serde(flatten)]
+    pub info: super::consumer::Info,
+    /// Stream sequence the consumer's ack floor is now sitting at after the
+    /// reset. For an empty / `None` request this echoes the previously held
+    /// ack-floor seq.
+    pub reset_seq: u64,
 }
 
 /// information about the given stream.
