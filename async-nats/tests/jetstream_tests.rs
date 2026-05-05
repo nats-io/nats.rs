@@ -4243,6 +4243,38 @@ mod jetstream {
         assert!(!consumer.info().await.unwrap().paused);
     }
 
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn allow_batch_publish_round_trip() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "BATCH".to_string(),
+                subjects: vec!["batch.>".to_string()],
+                allow_batch_publish: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(stream.cached_info().config.allow_batch_publish);
+
+        let info = jetstream
+            .get_stream("BATCH")
+            .await
+            .unwrap()
+            .info()
+            .await
+            .unwrap()
+            .clone();
+        assert!(info.config.allow_batch_publish);
+    }
+
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn message_with_ttl() {

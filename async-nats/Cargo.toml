@@ -60,7 +60,7 @@ jsonschema = "0.17.1"
 num = "0.4.1"
 
 [features]
-default = ["server_2_10", "server_2_11", "server_2_12", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
+default = ["server_2_10", "server_2_11", "server_2_12", "server_2_14", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
 # Enables Service API for the client.
 jetstream = ["dep:time", "dep:serde_nanos", "dep:tryhard", "dep:base64"]
 kv = ["jetstream"]
@@ -82,6 +82,7 @@ experimental = []
 "server_2_10" = []
 "server_2_11" = []
 "server_2_12" = []
+"server_2_14" = []
 # Used for enabling/disabling tests that by design take a lot of time to  complete.
 # Those tests are usually used for time-sensitive checks, like consumer heartbeats, longer timeouts, etc.
 slow_tests = []
@@ -96,7 +97,7 @@ harness = false
 
 [package.metadata.docs.rs]
 # We can't use `all-features` because the `fips` doesn't compile in restricted docs.rs environment.
-features = ["server_2_10", "server_2_11", "server_2_12", "jetstream", "kv", "object-store", "service", "nkeys", "nuid", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
+features = ["server_2_10", "server_2_11", "server_2_12", "server_2_14", "jetstream", "kv", "object-store", "service", "nkeys", "nuid", "crypto", "websockets", "experimental", "ring", "aws-lc-rs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-hack]

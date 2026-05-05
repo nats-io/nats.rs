@@ -1300,6 +1300,12 @@ pub struct Config {
         rename = "allow_msg_counter"
     )]
     pub allow_message_counter: bool,
+
+    /// Allows fast-ingest batch publishing on the stream (ADR-50).
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, skip_serializing_if = "is_default", rename = "allow_batched")]
+    pub allow_batch_publish: bool,
 }
 
 impl From<&Config> for Config {
