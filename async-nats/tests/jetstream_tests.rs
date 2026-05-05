@@ -4326,6 +4326,70 @@ mod jetstream {
         assert_eq!(cs.deliver_subject, "agg.deliver");
     }
 
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn consumer_reset() {
+        use bytes::Bytes;
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "RESET".to_string(),
+                subjects: vec!["reset.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..5u64 {
+            jetstream
+                .publish(format!("reset.{i}"), Bytes::from_static(b"x"))
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("c".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Reset to a specific seq.
+        let resp = consumer.reset(Some(3)).await.unwrap();
+        assert_eq!(resp.reset_seq, 3);
+
+        // Empty / None reset reports the ack-floor stream-seq the consumer
+        // is now sitting at — after the previous `Some(3)` call that's still 3.
+        let resp = consumer.reset(None).await.unwrap();
+        assert_eq!(resp.reset_seq, 3);
+
+        // Stream-level call also works and round-trips the requested seq.
+        let resp = stream.reset_consumer("c", Some(2)).await.unwrap();
+        assert_eq!(resp.reset_seq, 2);
+
+        // Reset below the configured `OptStartSeq` is rejected by the server.
+        let pinned = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pinned".to_string()),
+                deliver_policy: consumer::DeliverPolicy::ByStartSequence { start_sequence: 3 },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let err = stream.reset_consumer("pinned", Some(1)).await.unwrap_err();
+        assert!(format!("{err}").contains("below start seq"), "{err}");
+        let _ = pinned;
+    }
+
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn message_with_ttl() {
