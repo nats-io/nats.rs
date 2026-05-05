@@ -628,6 +628,17 @@ pub const NATS_BATCH_COMMIT_EOB: &str = "eob";
 /// subject. Currently the only legal value.
 pub const NATS_SCHEDULE_ROLLUP_SUB: &str = "sub";
 
+/// Predefined [`NATS_SCHEDULE`] expression: run once a year at midnight Jan 1.
+pub const NATS_SCHEDULE_YEARLY: &str = "@yearly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a month at midnight on the 1st.
+pub const NATS_SCHEDULE_MONTHLY: &str = "@monthly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a week at midnight Sat→Sun.
+pub const NATS_SCHEDULE_WEEKLY: &str = "@weekly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a day at midnight.
+pub const NATS_SCHEDULE_DAILY: &str = "@daily";
+/// Predefined [`NATS_SCHEDULE`] expression: run once an hour at the top of the hour.
+pub const NATS_SCHEDULE_HOURLY: &str = "@hourly";
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 struct CustomHeader {
     bytes: Bytes,
