@@ -1920,6 +1920,43 @@ pub struct Source {
     #[cfg(feature = "server_2_10")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub subject_transforms: Vec<SubjectTransform>,
+
+    /// Pre-created durable consumer to use for sourcing instead of the
+    /// auto-managed ephemeral one. Required for full control over the
+    /// consumer's lifecycle (security, advanced delivery/replay options)
+    /// when sourcing/mirroring from WorkQueue/Interest streams. Both
+    /// `name` and `deliver_subject` must be non-empty and valid; the
+    /// server rejects the config otherwise. See ADR-60.
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer: Option<StreamConsumerSource>,
+}
+
+/// Configures a pre-created durable consumer used for stream
+/// sourcing/mirroring. See ADR-60.
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
+pub struct StreamConsumerSource {
+    /// Name of the durable consumer to use for sourcing.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub name: String,
+    /// Deliver subject of the (push) consumer used for sourcing.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub deliver_subject: String,
+}
+
+#[cfg(feature = "server_2_14")]
+impl StreamConsumerSource {
+    /// Build a [`StreamConsumerSource`] with both required fields populated.
+    /// The server rejects either field empty (`NewJSSourceDurableConsumerCfgInvalidError`).
+    pub fn new(name: impl Into<String>, deliver_subject: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            deliver_subject: deliver_subject.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
