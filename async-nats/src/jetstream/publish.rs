@@ -31,4 +31,17 @@ pub struct PublishAck {
     /// Used only when published against stream with counters enabled.
     #[serde(default, rename = "val")]
     pub value: Option<String>,
+    /// Set on the final ack of an atomic batch publish (ADR-50): id of the
+    /// committed batch.
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, rename = "batch", skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<String>,
+    /// Set on the final ack of an atomic batch publish (ADR-50): number of
+    /// messages persisted in the committed batch (excludes any EOB-only
+    /// commit message).
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, rename = "count", skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<u64>,
 }
