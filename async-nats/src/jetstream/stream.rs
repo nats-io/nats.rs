@@ -1069,7 +1069,7 @@ impl<I> Stream<I> {
         &self,
         name: &str,
         seq: Option<u64>,
-    ) -> Result<ConsumerResetResponse, ConsumerError> {
+    ) -> Result<ConsumerResetResponse, ConsumerResetError> {
         let subject = format!("CONSUMER.RESET.{}.{}", self.name, name);
         let payload = ConsumerResetRequest {
             seq: seq.unwrap_or(0),
@@ -2391,6 +2391,71 @@ impl Display for ConsumerErrorKind {
 }
 
 pub type ConsumerError = Error<ConsumerErrorKind>;
+
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerResetErrorKind {
+    TimedOut,
+    Request,
+    /// Stream or consumer does not exist.
+    ///
+    /// Surfaced when the server replies with `CONSUMER_NOT_FOUND` /
+    /// `STREAM_NOT_FOUND`, or via core NATS `NoResponders` if the JS API
+    /// has no handler for the subject.
+    NotFound,
+    /// Reset request violates the consumer's `DeliverPolicy` constraints
+    /// (e.g. seq below `OptStartSeq`, or non-zero seq with a `DeliverPolicy`
+    /// other than `All` / `ByStartSequence` / `ByStartTime`).
+    InvalidReset,
+    JetStream(super::errors::Error),
+}
+
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+impl Display for ConsumerResetErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::NotFound => write!(f, "stream or consumer not found"),
+            Self::InvalidReset => write!(f, "invalid reset"),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
+        }
+    }
+}
+
+#[cfg(feature = "server_2_14")]
+pub type ConsumerResetError = Error<ConsumerResetErrorKind>;
+
+#[cfg(feature = "server_2_14")]
+impl From<super::errors::Error> for ConsumerResetError {
+    fn from(err: super::errors::Error) -> Self {
+        match err.error_code() {
+            super::errors::ErrorCode::CONSUMER_INVALID_RESET => {
+                ConsumerResetError::new(ConsumerResetErrorKind::InvalidReset)
+            }
+            super::errors::ErrorCode::CONSUMER_NOT_FOUND
+            | super::errors::ErrorCode::STREAM_NOT_FOUND => {
+                ConsumerResetError::new(ConsumerResetErrorKind::NotFound)
+            }
+            _ => ConsumerResetError::new(ConsumerResetErrorKind::JetStream(err)),
+        }
+    }
+}
+
+#[cfg(feature = "server_2_14")]
+impl From<super::context::RequestError> for ConsumerResetError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => ConsumerResetError::new(ConsumerResetErrorKind::TimedOut),
+            RequestErrorKind::NoResponders => {
+                ConsumerResetError::new(ConsumerResetErrorKind::NotFound)
+            }
+            _ => ConsumerResetError::with_source(ConsumerResetErrorKind::Request, err),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerCreateStrictErrorKind {
