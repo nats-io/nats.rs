@@ -1,3 +1,32 @@
+# v0.48.0
+## Added
+* Add recent jetstream error codes by @Jarema in https://github.com/nats-io/nats.rs/pull/1564
+* Add server pool callback by @Jarema in https://github.com/nats-io/nats.rs/pull/1559
+* Add Source.consumer for durable sourcing by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+* Add AckPolicy::FlowControl by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+* Add Consumer Reset API by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+* Add 2.14 schedule, batch, and rollup header constants by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+* Add PublishAck batch_id and batch_size fields by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+* Add `try_server_info` and `max_payload` methods by @yordis in https://github.com/nats-io/nats.rs/pull/1567
+
+## Fixed
+* Fix typo in create_or_update_key_value example by @ayymart in https://github.com/nats-io/nats.rs/pull/1569
+* Fix linter warning by @Jarema in https://github.com/nats-io/nats.rs/pull/1570
+* Preserve unsubscribe_after limit across reconnects by @MattPatchava in https://github.com/nats-io/nats.rs/pull/1560
+* Fix panic on reading non-utf8 data by @Jarema in https://github.com/nats-io/nats.rs/pull/1573
+
+## Changed
+* Bump rand by @Jarema in https://github.com/nats-io/nats.rs/pull/1566
+* Bump to thiserror v2 by @aumetra in https://github.com/nats-io/nats.rs/pull/1571
+* Orbit docs by @Jarema in https://github.com/nats-io/nats.rs/pull/1580
+* Cover remaining 2.14 server error codes and predefined cron schedules by @Jarema in https://github.com/nats-io/nats.rs/pull/1581
+
+## New Contributors
+* @ayymart made their first contribution in https://github.com/nats-io/nats.rs/pull/1569
+* @aumetra made their first contribution in https://github.com/nats-io/nats.rs/pull/1571
+* @yordis made their first contribution in https://github.com/nats-io/nats.rs/pull/1567
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.47.0...async-nats/v0.48.0
 # v0.47.0
 
 This release adds subject validation (with opt-out possibility) and wraps while connect attempt in timeout, making it more robust.
