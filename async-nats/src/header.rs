@@ -627,6 +627,10 @@ pub const NATS_BATCH_COMMIT_EOB: &str = "eob";
 /// Value constant for [`NATS_SCHEDULE_ROLLUP`]: rollup the schedule's target
 /// subject. Currently the only legal value.
 pub const NATS_SCHEDULE_ROLLUP_SUB: &str = "sub";
+/// Value constant for [`NATS_SCHEDULE_NEXT`]: clients set this to atomically
+/// cancel/end a schedule. Server only accepts this literal value from clients;
+/// any other value is rejected with `MessageSchedulesSchedulerInvalid`.
+pub const NATS_SCHEDULE_NEXT_PURGE: &str = "purge";
 
 /// Predefined [`NATS_SCHEDULE`] expression: run once a year at midnight Jan 1.
 pub const NATS_SCHEDULE_YEARLY: &str = "@yearly";
