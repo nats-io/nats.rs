@@ -34,7 +34,7 @@ use crate::error::Error;
 use crate::jetstream::consumer;
 
 #[cfg(feature = "server_2_14")]
-use crate::jetstream::stream::{ConsumerError, ConsumerResetRequest, ConsumerResetResponse};
+use crate::jetstream::stream::{ConsumerResetError, ConsumerResetRequest, ConsumerResetResponse};
 
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
@@ -181,7 +181,7 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     pub async fn reset(
         &mut self,
         seq: Option<u64>,
-    ) -> Result<ConsumerResetResponse, ConsumerError> {
+    ) -> Result<ConsumerResetResponse, ConsumerResetError> {
         let subject = format!(
             "CONSUMER.RESET.{}.{}",
             self.info.stream_name, self.info.name

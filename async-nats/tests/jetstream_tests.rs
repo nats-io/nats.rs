@@ -4386,7 +4386,7 @@ mod jetstream {
             .await
             .unwrap();
         let err = stream.reset_consumer("pinned", Some(1)).await.unwrap_err();
-        assert!(format!("{err}").contains("below start seq"), "{err}");
+        assert_eq!(err.kind(), stream::ConsumerResetErrorKind::InvalidReset);
         let _ = pinned;
     }
 
