@@ -18,7 +18,7 @@ use futures_util::{
 };
 
 #[cfg(feature = "server_2_11")]
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::datetime::{rfc3339, DateTime};
 
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
@@ -2587,7 +2587,7 @@ pub struct Config {
         with = "rfc3339::option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub pause_until: Option<OffsetDateTime>,
+    pub pause_until: Option<DateTime>,
 }
 
 impl IntoConsumerConfig for &Config {

@@ -40,7 +40,7 @@ use std::{
 };
 use std::{sync::atomic::Ordering, time::Duration};
 #[cfg(feature = "server_2_11")]
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::datetime::{rfc3339, DateTime};
 use tracing::{debug, trace};
 
 const ORDERED_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
@@ -286,7 +286,7 @@ pub struct Config {
         with = "rfc3339::option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub pause_until: Option<OffsetDateTime>,
+    pub pause_until: Option<DateTime>,
 }
 
 impl FromConsumer for Config {

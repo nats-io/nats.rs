@@ -33,7 +33,7 @@ use bytes::Bytes;
 use futures_util::{future::BoxFuture, FutureExt, TryFutureExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::datetime::{rfc3339, DateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
@@ -989,7 +989,7 @@ impl<I> Stream<I> {
     pub async fn pause_consumer(
         &self,
         name: &str,
-        pause_until: OffsetDateTime,
+        pause_until: DateTime,
     ) -> Result<PauseResponse, ConsumerError> {
         self.request_pause_consumer(name, Some(pause_until)).await
     }
@@ -1023,7 +1023,7 @@ impl<I> Stream<I> {
     async fn request_pause_consumer(
         &self,
         name: &str,
-        pause_until: Option<OffsetDateTime>,
+        pause_until: Option<DateTime>,
     ) -> Result<PauseResponse, ConsumerError> {
         let subject = format!("CONSUMER.PAUSE.{}.{}", self.name, name);
         let payload = &PauseResumeConsumerRequest { pause_until };
@@ -1316,7 +1316,7 @@ pub struct Config {
         with = "rfc3339::option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub pause_until: Option<OffsetDateTime>,
+    pub pause_until: Option<DateTime>,
 
     /// Allows setting a TTL for a message in the stream.
     #[cfg(feature = "server_2_11")]
@@ -1625,7 +1625,7 @@ pub struct Info {
     pub config: Config,
     /// The time that this stream was created.
     #[serde(with = "rfc3339")]
-    pub created: time::OffsetDateTime,
+    pub created: DateTime,
     /// Various metrics associated with this stream.
     pub state: State,
     /// Information about leader and replicas.
@@ -1657,7 +1657,7 @@ pub struct DeleteStatus {
 pub struct PauseResponse {
     pub paused: bool,
     #[serde(with = "rfc3339")]
-    pub pause_until: OffsetDateTime,
+    pub pause_until: DateTime,
     #[serde(default, with = "serde_nanos")]
     pub pause_remaining: Option<Duration>,
 }
@@ -1666,7 +1666,7 @@ pub struct PauseResponse {
 #[derive(Serialize, Debug)]
 struct PauseResumeConsumerRequest {
     #[serde(with = "rfc3339::option", skip_serializing_if = "Option::is_none")]
-    pause_until: Option<OffsetDateTime>,
+    pause_until: Option<DateTime>,
 }
 
 #[cfg(feature = "server_2_14")]
@@ -1703,13 +1703,13 @@ pub struct State {
     pub first_sequence: u64,
     /// The time associated with the oldest message still present in this stream
     #[serde(with = "rfc3339", rename = "first_ts")]
-    pub first_timestamp: time::OffsetDateTime,
+    pub first_timestamp: DateTime,
     /// The last sequence number assigned to a message in this stream
     #[serde(rename = "last_seq")]
     pub last_sequence: u64,
     /// The time that the last message was received by this stream
     #[serde(with = "rfc3339", rename = "last_ts")]
-    pub last_timestamp: time::OffsetDateTime,
+    pub last_timestamp: DateTime,
     /// The number of consumers configured to consume this stream
     pub consumer_count: usize,
     /// The number of subjects in the stream
@@ -1747,7 +1747,7 @@ pub struct RawMessage {
 
     /// The time the message was published.
     #[serde(rename = "time", with = "rfc3339")]
-    pub time: time::OffsetDateTime,
+    pub time: DateTime,
 }
 
 impl TryFrom<RawMessage> for StreamMessage {
@@ -1875,7 +1875,7 @@ pub struct ClusterInfo {
     pub leader: Option<String>,
     /// The time since this server has been the leader.
     #[serde(default, with = "rfc3339::option")]
-    pub leader_since: Option<OffsetDateTime>,
+    pub leader_since: Option<DateTime>,
     /// Indicates if this account is a system account.
     #[cfg(feature = "server_2_12")]
     #[serde(default)]
@@ -1979,7 +1979,7 @@ pub struct Source {
         with = "rfc3339::option"
     )]
     /// Optional source start time.
-    pub start_time: Option<OffsetDateTime>,
+    pub start_time: Option<DateTime>,
     /// Optional additional filter subject.
     #[serde(default, skip_serializing_if = "is_default")]
     pub filter_subject: Option<String>,
