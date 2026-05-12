@@ -38,7 +38,7 @@ use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErr
 use super::{consumer::push::Ordered, stream::StorageType};
 use crate::error::Error;
 use crate::header::NATS_ROLLUP;
-use time::{serde::rfc3339, OffsetDateTime};
+use crate::datetime::{self, rfc3339, DateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const ROLLUP_SUBJECT: &str = "sub";
@@ -360,7 +360,7 @@ impl ObjectStore {
             chunks: object_chunks,
             size: object_size,
             digest: Some(format!("SHA-256={}", URL_SAFE.encode(digest))),
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(datetime::now()),
             deleted: false,
             metadata: object_meta.metadata,
             headers: object_meta.headers,
@@ -723,7 +723,7 @@ impl ObjectStore {
             nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(datetime::now()),
             digest: None,
             deleted: false,
             metadata: HashMap::default(),
@@ -788,7 +788,7 @@ impl ObjectStore {
             nuid: crate::id_generator::next(),
             size: 0,
             chunks: 0,
-            modified: Some(OffsetDateTime::now_utc()),
+            modified: Some(datetime::now()),
             digest: None,
             deleted: false,
             metadata: HashMap::default(),
@@ -1111,7 +1111,7 @@ pub struct ObjectInfo {
     /// Date and time the object was last modified.
     #[serde(default, with = "rfc3339::option")]
     #[serde(rename = "mtime")]
-    pub modified: Option<time::OffsetDateTime>,
+    pub modified: Option<DateTime>,
     /// Digest of the object stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,

@@ -27,7 +27,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use regex::Regex;
 use std::sync::LazyLock;
-use time::OffsetDateTime;
+use crate::datetime::DateTime;
 use tracing::debug;
 
 use crate::error::Error;
@@ -1533,7 +1533,7 @@ pub struct Entry {
     /// Distance from the latest value.
     pub delta: u64,
     /// The time the data was put in the bucket.
-    pub created: OffsetDateTime,
+    pub created: DateTime,
     /// The kind of operation that caused this entry.
     pub operation: Operation,
     /// Set to true after all historical messages have been received, and

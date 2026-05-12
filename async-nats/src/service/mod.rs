@@ -30,8 +30,7 @@ use futures_util::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
-use time::serde::rfc3339;
-use time::OffsetDateTime;
+use crate::datetime::{self, rfc3339, DateTime};
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tracing::debug;
 
@@ -91,7 +90,7 @@ pub struct Stats {
     // Service version.
     pub version: String,
     #[serde(with = "rfc3339")]
-    pub started: OffsetDateTime,
+    pub started: DateTime,
     /// Statistics of all endpoints.
     pub endpoints: Vec<endpoint::Stats>,
 }
@@ -354,7 +353,7 @@ impl Service {
             .queue_group
             .unwrap_or(DEFAULT_QUEUE_GROUP.to_string());
         let id = crate::id_generator::next();
-        let started = OffsetDateTime::now_utc();
+        let started = datetime::now();
         let subjects = Arc::new(Mutex::new(Vec::new()));
         let info = Info {
             kind: "io.nats.micro.v1.info_response".to_string(),

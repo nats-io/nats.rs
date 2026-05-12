@@ -37,6 +37,7 @@ mod jetstream {
 
     use super::*;
     use async_nats::connection::State;
+    use async_nats::datetime;
     use async_nats::header::{self, HeaderMap, NATS_MESSAGE_ID};
     #[cfg(feature = "server_2_11")]
     use async_nats::jetstream::consumer::pull::BatchConfig;
@@ -58,7 +59,7 @@ mod jetstream {
     use async_nats::jetstream::AckKind;
     use async_nats::{ConnectOptions, StatusCode};
     use futures_util::stream::{StreamExt, TryStreamExt};
-    use time::OffsetDateTime;
+    use async_nats::datetime::DateTime;
     use tracing::debug;
 
     #[tokio::test]
@@ -1036,7 +1037,7 @@ mod jetstream {
             .unwrap()
             .create_consumer(consumer::pull::Config {
                 deliver_policy: DeliverPolicy::ByStartTime {
-                    start_time: OffsetDateTime::now_utc(),
+                    start_time: datetime::now(),
                 },
                 ..Default::default()
             })
@@ -4367,7 +4368,6 @@ mod jetstream {
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn pause_consumer() {
-        use time::Duration;
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::ConnectOptions::new()
             .connect(server.client_url())
@@ -4397,7 +4397,7 @@ mod jetstream {
         stream
             .pause_consumer(
                 "name",
-                OffsetDateTime::now_utc().saturating_add(Duration::seconds_f32(10.0)),
+                datetime::add_std_duration(datetime::now(), Duration::from_secs(10)),
             )
             .await
             .unwrap();
@@ -4414,7 +4414,7 @@ mod jetstream {
             .create_consumer(consumer::pull::Config {
                 durable_name: Some("blame".to_string()),
                 pause_until: Some(
-                    OffsetDateTime::now_utc().saturating_add(Duration::seconds_f32(3.0)),
+                    datetime::add_std_duration(datetime::now(), Duration::from_secs(3)),
                 ),
                 ..Default::default()
             })
