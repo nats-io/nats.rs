@@ -22,8 +22,7 @@ use futures_util::future::TryFutureExt;
 use futures_util::StreamExt;
 use std::fmt::Display;
 use std::{mem, time::Duration};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+use crate::datetime::{self, DateTime};
 
 /// A message received directly from the stream, without leveraging a consumer.
 #[derive(Debug, Clone)]
@@ -32,7 +31,7 @@ pub struct StreamMessage {
     pub sequence: u64,
     pub headers: HeaderMap,
     pub payload: Bytes,
-    pub time: OffsetDateTime,
+    pub time: DateTime,
 }
 
 /// An outbound message to be published.
@@ -182,7 +181,7 @@ impl TryFrom<crate::Message> for StreamMessage {
                 StreamMessageError::with_source(StreamMessageErrorKind::MissingHeader, "timestamp")
             })
             .and_then(|time| {
-                OffsetDateTime::parse(time.as_str(), &Rfc3339).map_err(|err| {
+                datetime::parse_rfc3339(time.as_str()).map_err(|err| {
                     StreamMessageError::with_source(
                         StreamMessageErrorKind::ParseError,
                         format!("could not parse timestamp header: {err}"),
@@ -514,7 +513,7 @@ impl Message {
                 consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    datetime::from_nanos(nanos)?
                 },
                 pending: try_parse!(),
                 token: if n_tokens >= 9 {
@@ -536,7 +535,7 @@ impl Message {
                 consumer_sequence: try_parse!(),
                 published: {
                     let nanos: i128 = try_parse!();
-                    OffsetDateTime::from_unix_timestamp_nanos(nanos)?
+                    datetime::from_nanos(nanos)?
                 },
                 pending: try_parse!(),
                 token: None,
@@ -813,7 +812,7 @@ pub struct Info<'a> {
     /// the number of messages known by the server to be pending to this consumer
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
-    pub published: time::OffsetDateTime,
+    pub published: DateTime,
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }

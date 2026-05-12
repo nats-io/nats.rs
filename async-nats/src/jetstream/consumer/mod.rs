@@ -21,10 +21,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::serde::rfc3339;
-
-#[cfg(feature = "server_2_11")]
-use time::OffsetDateTime;
+use crate::datetime::{rfc3339, DateTime};
 
 use super::context::{ConsumerInfoError, RequestError};
 use super::response::Response;
@@ -225,7 +222,7 @@ pub struct Info {
     pub name: String,
     /// The time the consumer was created
     #[serde(with = "rfc3339")]
-    pub created: time::OffsetDateTime,
+    pub created: DateTime,
     /// The consumer's configuration
     pub config: Config,
     /// Statistics for delivered messages
@@ -272,7 +269,7 @@ pub struct SequenceInfo {
         with = "rfc3339::option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub last_active: Option<time::OffsetDateTime>,
+    pub last_active: Option<DateTime>,
 }
 
 /// Configuration for consumers. From a high level, the
@@ -429,7 +426,7 @@ pub struct Config {
         with = "rfc3339::option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub pause_until: Option<OffsetDateTime>,
+    pub pause_until: Option<DateTime>,
 }
 
 #[cfg(feature = "server_2_11")]
@@ -514,7 +511,7 @@ pub enum DeliverPolicy {
     #[serde(rename = "by_start_time")]
     ByStartTime {
         #[serde(rename = "opt_start_time", with = "rfc3339")]
-        start_time: time::OffsetDateTime,
+        start_time: DateTime,
     },
     /// `LastPerSubject` will start the consumer with the last message
     /// for all subjects received.
