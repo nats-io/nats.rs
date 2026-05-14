@@ -11,7 +11,7 @@ async fn main() -> Result<(), async_nats::Error> {
     headers.insert("X-Priority", "high");
 
     let response = client
-        .request_with_headers("service".into(), headers, "data".into())
+        .request_with_headers("service", headers, "data".into())
         .await?;
 
     println!("Response: {}", String::from_utf8_lossy(&response.payload));

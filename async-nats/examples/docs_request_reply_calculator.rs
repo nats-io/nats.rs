@@ -12,15 +12,20 @@ async fn main() -> Result<(), async_nats::Error> {
     let service_client = client.clone();
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
-            let input = String::from_utf8_lossy(&msg.payload);
-            let parts: Vec<&str> = input.split_whitespace().collect();
+            if let Some(reply) = msg.reply {
+                let input = String::from_utf8_lossy(&msg.payload);
+                let parts: Vec<&str> = input.split_whitespace().collect();
 
-            if parts.len() == 2 {
-                if let (Ok(a), Ok(b)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
-                    let result = (a + b).to_string();
-                    if let Some(reply) = msg.reply {
+                if parts.len() == 2 {
+                    if let (Ok(a), Ok(b)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                        let result = (a + b).to_string();
                         service_client.publish(reply, result.into()).await.ok();
                     }
+                    else {
+                        service_client.publish(reply, "error: invalid input".into()).await.ok();
+                    }
+                } else {
+                    service_client.publish(reply, "error: invalid input".into()).await.ok();
                 }
             }
         }
@@ -29,11 +34,14 @@ async fn main() -> Result<(), async_nats::Error> {
     // Make calculations
     sleep(Duration::from_millis(100)).await;
 
-    let resp = client.request("calc.add".into(), "5 3".into()).await?;
+    let resp = client.request("calc.add", "5 3".into()).await?;
     println!("5 + 3 = {}", String::from_utf8_lossy(&resp.payload));
 
-    let resp = client.request("calc.add".into(), "10 7".into()).await?;
+    let resp = client.request("calc.add", "10 7".into()).await?;
     println!("10 + 7 = {}", String::from_utf8_lossy(&resp.payload));
+
+    let resp = client.request("calc.add", "10 x".into()).await?;
+    println!("10 + x = {}", String::from_utf8_lossy(&resp.payload));
     // NATS-DOC-END
 
     sleep(Duration::from_millis(100)).await;
