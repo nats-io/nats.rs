@@ -4243,6 +4243,153 @@ mod jetstream {
         assert!(!consumer.info().await.unwrap().paused);
     }
 
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn allow_batch_publish_round_trip() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "BATCH".to_string(),
+                subjects: vec!["batch.>".to_string()],
+                allow_batch_publish: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(stream.cached_info().config.allow_batch_publish);
+
+        let info = jetstream
+            .get_stream("BATCH")
+            .await
+            .unwrap()
+            .info()
+            .await
+            .unwrap()
+            .clone();
+        assert!(info.config.allow_batch_publish);
+    }
+
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn source_consumer_round_trip() {
+        use async_nats::jetstream::stream::{Source, StreamConsumerSource};
+
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        // Source stream + a durable consumer the aggregate will use.
+        jetstream
+            .create_stream(stream::Config {
+                name: "ORIGIN".to_string(),
+                subjects: vec!["origin.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let aggregate = jetstream
+            .create_stream(stream::Config {
+                name: "AGG".to_string(),
+                sources: Some(vec![Source {
+                    name: "ORIGIN".to_string(),
+                    consumer: Some(StreamConsumerSource::new("agg-consumer", "agg.deliver")),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let sources = aggregate.cached_info().config.sources.clone().unwrap();
+        let cs = sources[0].consumer.clone().unwrap();
+        assert_eq!(cs.name, "agg-consumer");
+        assert_eq!(cs.deliver_subject, "agg.deliver");
+
+        // Fresh fetch — confirm the server actually persisted `consumer`.
+        let mut fresh = jetstream.get_stream("AGG").await.unwrap();
+        let info = fresh.info().await.unwrap();
+        let cs = info.config.sources.clone().unwrap()[0]
+            .consumer
+            .clone()
+            .unwrap();
+        assert_eq!(cs.name, "agg-consumer");
+        assert_eq!(cs.deliver_subject, "agg.deliver");
+    }
+
+    #[cfg(feature = "server_2_14")]
+    #[tokio::test]
+    async fn consumer_reset() {
+        use bytes::Bytes;
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "RESET".to_string(),
+                subjects: vec!["reset.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..5u64 {
+            jetstream
+                .publish(format!("reset.{i}"), Bytes::from_static(b"x"))
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut consumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("c".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Reset to a specific seq.
+        let resp = consumer.reset(Some(3)).await.unwrap();
+        assert_eq!(resp.reset_seq, 3);
+
+        // Empty / None reset reports the ack-floor stream-seq the consumer
+        // is now sitting at — after the previous `Some(3)` call that's still 3.
+        let resp = consumer.reset(None).await.unwrap();
+        assert_eq!(resp.reset_seq, 3);
+
+        // Stream-level call also works and round-trips the requested seq.
+        let resp = stream.reset_consumer("c", Some(2)).await.unwrap();
+        assert_eq!(resp.reset_seq, 2);
+
+        // Reset below the configured `OptStartSeq` is rejected by the server.
+        let pinned = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pinned".to_string()),
+                deliver_policy: consumer::DeliverPolicy::ByStartSequence { start_sequence: 3 },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let err = stream.reset_consumer("pinned", Some(1)).await.unwrap_err();
+        assert_eq!(err.kind(), stream::ConsumerResetErrorKind::InvalidReset);
+        let _ = pinned;
+    }
+
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
     async fn message_with_ttl() {

@@ -33,6 +33,9 @@ use super::Context;
 use crate::error::Error;
 use crate::jetstream::consumer;
 
+#[cfg(feature = "server_2_14")]
+use crate::jetstream::stream::{ConsumerResetError, ConsumerResetRequest, ConsumerResetResponse};
+
 pub trait IntoConsumerConfig {
     fn into_consumer_config(self) -> Config;
 }
@@ -143,6 +146,56 @@ impl<T: IntoConsumerConfig> Consumer<T> {
     /// ```
     pub fn cached_info(&self) -> &consumer::Info {
         &self.info
+    }
+
+    /// Reset this consumer's delivery state (ADR-60).
+    ///
+    /// `seq` semantics:
+    /// - `None` (or `Some(0)`): reset back to the consumer's ack floor.
+    /// - `Some(n)` with `n > 0`: next delivered message will have a stream
+    ///   sequence of at least `n`.
+    ///
+    /// On success the cached [Info] is updated from the response.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// use async_nats::jetstream::consumer::PullConsumer;
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let mut consumer: PullConsumer = jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .get_consumer("processor")
+    ///     .await?;
+    ///
+    /// consumer.reset(Some(42)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    pub async fn reset(
+        &mut self,
+        seq: Option<u64>,
+    ) -> Result<ConsumerResetResponse, ConsumerResetError> {
+        let subject = format!(
+            "CONSUMER.RESET.{}.{}",
+            self.info.stream_name, self.info.name
+        );
+        let payload = ConsumerResetRequest {
+            seq: seq.unwrap_or(0),
+        };
+        match self.context.request(subject, &payload).await? {
+            Response::Ok::<ConsumerResetResponse>(resp) => {
+                self.info = resp.info.clone();
+                Ok(resp)
+            }
+            Response::Err { error } => Err(error.into()),
+        }
     }
 }
 
@@ -485,6 +538,14 @@ pub enum AckPolicy {
     /// message is acknowledged. Useful for "batching" acknowledgment.
     #[serde(rename = "all")]
     All = 1,
+    /// Used by server-managed durable sourcing/mirroring consumers (ADR-60).
+    /// Behaves like [`AckPolicy::All`] but acknowledgements are driven by
+    /// flow-control responses from the receiving server.
+    // Discriminant `3` matches the server-side enum order (consumer.go:335).
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(rename = "flow_control")]
+    FlowControl = 3,
 }
 
 /// `ReplayPolicy` controls whether messages are sent to a consumer

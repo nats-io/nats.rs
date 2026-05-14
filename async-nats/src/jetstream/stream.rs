@@ -1032,6 +1032,55 @@ impl<I> Stream<I> {
         }
     }
 
+    /// Reset a [Consumer]'s delivery state (ADR-60).
+    ///
+    /// `seq` semantics:
+    /// - `None` (or `Some(0)`): reset back to the consumer's ack floor.
+    ///   Pending and redelivered messages are cleared; the ack-floor stream
+    ///   sequence is left where it was.
+    /// - `Some(n)` with `n > 0`: ack-floor stream sequence is set to one
+    ///   below `n`; the next delivered message will have a stream sequence
+    ///   of at least `n`.
+    ///
+    /// Only valid on consumers with
+    /// [`DeliverPolicy::All`][crate::jetstream::consumer::DeliverPolicy::All],
+    /// [`DeliverPolicy::ByStartSequence`][crate::jetstream::consumer::DeliverPolicy::ByStartSequence],
+    /// or
+    /// [`DeliverPolicy::ByStartTime`][crate::jetstream::consumer::DeliverPolicy::ByStartTime].
+    /// For policies with a configured starting sequence/time, resets below
+    /// the configured start are rejected by the server.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// let stream = jetstream.get_stream("events").await?;
+    /// stream.reset_consumer("processor", Some(42)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    pub async fn reset_consumer(
+        &self,
+        name: &str,
+        seq: Option<u64>,
+    ) -> Result<ConsumerResetResponse, ConsumerResetError> {
+        let subject = format!("CONSUMER.RESET.{}.{}", self.name, name);
+        let payload = ConsumerResetRequest {
+            seq: seq.unwrap_or(0),
+        };
+
+        match self.context.request(subject, &payload).await? {
+            Response::Ok::<ConsumerResetResponse>(resp) => Ok(resp),
+            Response::Err { error } => Err(error.into()),
+        }
+    }
+
     /// Lists names of all consumers for current stream.
     ///
     /// # Examples
@@ -1300,6 +1349,12 @@ pub struct Config {
         rename = "allow_msg_counter"
     )]
     pub allow_message_counter: bool,
+
+    /// Allows fast-ingest batch publishing on the stream (ADR-50).
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, skip_serializing_if = "is_default", rename = "allow_batched")]
+    pub allow_batch_publish: bool,
 }
 
 impl From<&Config> for Config {
@@ -1612,6 +1667,28 @@ struct PauseResumeConsumerRequest {
     pause_until: Option<OffsetDateTime>,
 }
 
+#[cfg(feature = "server_2_14")]
+#[derive(Serialize, Debug)]
+pub(crate) struct ConsumerResetRequest {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub(crate) seq: u64,
+}
+
+/// Response from a [`Stream::reset_consumer`] / [`crate::jetstream::consumer::Consumer::reset`] call.
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConsumerResetResponse {
+    /// Refreshed [Info][crate::jetstream::consumer::Info] for the consumer
+    /// after the reset has been applied.
+    #[serde(flatten)]
+    pub info: super::consumer::Info,
+    /// Stream sequence the consumer's ack floor is now sitting at after the
+    /// reset. For an empty / `None` request this echoes the previously held
+    /// ack-floor seq.
+    pub reset_seq: u64,
+}
+
 /// information about the given stream.
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct State {
@@ -1914,6 +1991,43 @@ pub struct Source {
     #[cfg(feature = "server_2_10")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub subject_transforms: Vec<SubjectTransform>,
+
+    /// Pre-created durable consumer to use for sourcing instead of the
+    /// auto-managed ephemeral one. Required for full control over the
+    /// consumer's lifecycle (security, advanced delivery/replay options)
+    /// when sourcing/mirroring from WorkQueue/Interest streams. Both
+    /// `name` and `deliver_subject` must be non-empty and valid; the
+    /// server rejects the config otherwise. See ADR-60.
+    #[cfg(feature = "server_2_14")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer: Option<StreamConsumerSource>,
+}
+
+/// Configures a pre-created durable consumer used for stream
+/// sourcing/mirroring. See ADR-60.
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
+pub struct StreamConsumerSource {
+    /// Name of the durable consumer to use for sourcing.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub name: String,
+    /// Deliver subject of the (push) consumer used for sourcing.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub deliver_subject: String,
+}
+
+#[cfg(feature = "server_2_14")]
+impl StreamConsumerSource {
+    /// Build a [`StreamConsumerSource`] with both required fields populated.
+    /// The server rejects either field empty (`NewJSSourceDurableConsumerCfgInvalidError`).
+    pub fn new(name: impl Into<String>, deliver_subject: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            deliver_subject: deliver_subject.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
@@ -2277,6 +2391,71 @@ impl Display for ConsumerErrorKind {
 }
 
 pub type ConsumerError = Error<ConsumerErrorKind>;
+
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerResetErrorKind {
+    TimedOut,
+    Request,
+    /// Stream or consumer does not exist.
+    ///
+    /// Surfaced when the server replies with `CONSUMER_NOT_FOUND` /
+    /// `STREAM_NOT_FOUND`, or via core NATS `NoResponders` if the JS API
+    /// has no handler for the subject.
+    NotFound,
+    /// Reset request violates the consumer's `DeliverPolicy` constraints
+    /// (e.g. seq below `OptStartSeq`, or non-zero seq with a `DeliverPolicy`
+    /// other than `All` / `ByStartSequence` / `ByStartTime`).
+    InvalidReset,
+    JetStream(super::errors::Error),
+}
+
+#[cfg(feature = "server_2_14")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_14")))]
+impl Display for ConsumerResetErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Request => write!(f, "request failed"),
+            Self::NotFound => write!(f, "stream or consumer not found"),
+            Self::InvalidReset => write!(f, "invalid reset"),
+            Self::JetStream(err) => write!(f, "JetStream error: {err}"),
+        }
+    }
+}
+
+#[cfg(feature = "server_2_14")]
+pub type ConsumerResetError = Error<ConsumerResetErrorKind>;
+
+#[cfg(feature = "server_2_14")]
+impl From<super::errors::Error> for ConsumerResetError {
+    fn from(err: super::errors::Error) -> Self {
+        match err.error_code() {
+            super::errors::ErrorCode::CONSUMER_INVALID_RESET => {
+                ConsumerResetError::new(ConsumerResetErrorKind::InvalidReset)
+            }
+            super::errors::ErrorCode::CONSUMER_NOT_FOUND
+            | super::errors::ErrorCode::STREAM_NOT_FOUND => {
+                ConsumerResetError::new(ConsumerResetErrorKind::NotFound)
+            }
+            _ => ConsumerResetError::new(ConsumerResetErrorKind::JetStream(err)),
+        }
+    }
+}
+
+#[cfg(feature = "server_2_14")]
+impl From<super::context::RequestError> for ConsumerResetError {
+    fn from(err: super::context::RequestError) -> Self {
+        match err.kind() {
+            RequestErrorKind::TimedOut => ConsumerResetError::new(ConsumerResetErrorKind::TimedOut),
+            RequestErrorKind::NoResponders => {
+                ConsumerResetError::new(ConsumerResetErrorKind::NotFound)
+            }
+            _ => ConsumerResetError::with_source(ConsumerResetErrorKind::Request, err),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerCreateStrictErrorKind {

@@ -588,7 +588,56 @@ standard_headers! {
     (NatsMessageTtl, NATS_MESSAGE_TTL, b"Nats-TTL");
     /// Reason why the delete marked on a stream with enabled markers was put.
     (NatsMarkerReason, NATS_MARKER_REASON, b"Nats-Marker-Reason");
+    /// Initiates a rollup of the given subject(s); valid values are `sub` and `all`.
+    (NatsRollup, NATS_ROLLUP, b"Nats-Rollup");
+    /// Schedule expression for a JetStream message scheduler entry. ADR-51.
+    (NatsSchedule, NATS_SCHEDULE, b"Nats-Schedule");
+    /// Target subject the schedule publishes to.
+    (NatsScheduleTarget, NATS_SCHEDULE_TARGET, b"Nats-Schedule-Target");
+    /// TTL applied to messages produced by the schedule.
+    (NatsScheduleTtl, NATS_SCHEDULE_TTL, b"Nats-Schedule-TTL");
+    /// Source subject sampled into the schedule output.
+    (NatsScheduleSource, NATS_SCHEDULE_SOURCE, b"Nats-Schedule-Source");
+    /// Time zone for cron schedules. Accepts IANA names like `America/New_York`.
+    (NatsScheduleTimeZone, NATS_SCHEDULE_TIME_ZONE, b"Nats-Schedule-Time-Zone");
+    /// Auto-applies a rollup on the schedule target. Currently only `sub` is valid.
+    (NatsScheduleRollup, NATS_SCHEDULE_ROLLUP, b"Nats-Schedule-Rollup");
+    /// On schedule-produced messages: the subject of the originating schedule.
+    (NatsScheduler, NATS_SCHEDULER, b"Nats-Scheduler");
+    /// On schedule-produced messages: timestamp of next firing or `purge` for delayed schedules.
+    (NatsScheduleNext, NATS_SCHEDULE_NEXT, b"Nats-Schedule-Next");
+    /// Atomic batch publish: batch id (max 64 chars).
+    (NatsBatchId, NATS_BATCH_ID, b"Nats-Batch-Id");
+    /// Atomic batch publish: per-message sequence within the batch.
+    (NatsBatchSequence, NATS_BATCH_SEQUENCE, b"Nats-Batch-Sequence");
+    /// Atomic batch publish: commit marker. `1` to commit and store the final
+    /// message; `eob` to commit without storing it (end-of-batch).
+    (NatsBatchCommit, NATS_BATCH_COMMIT, b"Nats-Batch-Commit");
+    /// Minimum JetStream API level the publishing client requires; the server
+    /// will reject the message (and the enclosing batch, if any) when its own
+    /// level is below the value set here.
+    (NatsRequiredApiLevel, NATS_REQUIRED_API_LEVEL, b"Nats-Required-Api-Level");
 }
+
+/// Value constant for [`NATS_BATCH_COMMIT`]: commit and store the final message.
+pub const NATS_BATCH_COMMIT_FINAL: &str = "1";
+/// Value constant for [`NATS_BATCH_COMMIT`]: commit without storing the final
+/// message (end-of-batch). Server is case-sensitive on this string.
+pub const NATS_BATCH_COMMIT_EOB: &str = "eob";
+/// Value constant for [`NATS_SCHEDULE_ROLLUP`]: rollup the schedule's target
+/// subject. Currently the only legal value.
+pub const NATS_SCHEDULE_ROLLUP_SUB: &str = "sub";
+
+/// Predefined [`NATS_SCHEDULE`] expression: run once a year at midnight Jan 1.
+pub const NATS_SCHEDULE_YEARLY: &str = "@yearly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a month at midnight on the 1st.
+pub const NATS_SCHEDULE_MONTHLY: &str = "@monthly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a week at midnight Sat→Sun.
+pub const NATS_SCHEDULE_WEEKLY: &str = "@weekly";
+/// Predefined [`NATS_SCHEDULE`] expression: run once a day at midnight.
+pub const NATS_SCHEDULE_DAILY: &str = "@daily";
+/// Predefined [`NATS_SCHEDULE`] expression: run once an hour at the top of the hour.
+pub const NATS_SCHEDULE_HOURLY: &str = "@hourly";
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 struct CustomHeader {
