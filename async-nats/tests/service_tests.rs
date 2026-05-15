@@ -16,7 +16,7 @@ mod service {
     use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures_util::StreamExt;
-    use jsonschema::JSONSchema;
+    use jsonschema::Validator as JSONSchema;
     use std::error::Error;
     use std::fmt::Display;
     use std::{collections::HashMap, str::from_utf8};
@@ -558,12 +558,10 @@ mod service {
                 .await
                 .unwrap();
 
-            match JSONSchema::compile(&schema).unwrap().validate(&data) {
+            match JSONSchema::new(&schema).unwrap().validate(&data) {
                 Ok(_) => (),
-                Err(mut errs) => {
-                    if let Some(err) = errs.next() {
-                        panic!("schema {endpoint} validation error: {err}")
-                    }
+                Err(err) => {
+                    panic!("schema {endpoint} validation error: {err}")
                 }
             };
         }
