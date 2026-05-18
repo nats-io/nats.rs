@@ -1,4 +1,3 @@
-use async_nats;
 use futures::StreamExt;
 
 #[tokio::main]
@@ -22,7 +21,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let client_b = client.clone();
     tokio::spawn(async move {
         while let Some(msg) = sub_b.next().await {
-            let response = format!("calculated result from B");
+            let response = "calculated result from B".to_string();
             if let Some(reply) = msg.reply {
                 client_b.publish(reply, response.into()).await.ok();
             }

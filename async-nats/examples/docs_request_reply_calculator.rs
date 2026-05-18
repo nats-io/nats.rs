@@ -1,4 +1,3 @@
-use async_nats;
 use futures::StreamExt;
 use tokio::time::{sleep, Duration};
 

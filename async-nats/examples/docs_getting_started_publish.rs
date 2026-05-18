@@ -1,5 +1,3 @@
-use async_nats;
-
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
     // Connect to NATS demo server

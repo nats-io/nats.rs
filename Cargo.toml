@@ -4,11 +4,14 @@ resolver = "2"
 
 members = [
   "async-nats",
-  "nats-server"
+  "nats-server",
+  "parser-fixtures",
+  "nats-parse-baseline",
+  "nats-parse-std",
+  "nats-parse-core",
 ]
 
 exclude = [
   "nats",
   "nats/nats_test_server"
 ]
-

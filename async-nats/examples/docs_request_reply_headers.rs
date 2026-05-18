@@ -15,7 +15,11 @@ async fn main() -> Result<(), async_nats::Error> {
         .await?;
 
     println!("Response: {}", String::from_utf8_lossy(&response.payload));
-    if let Some(response_id) = response.headers.as_ref().and_then(|h| h.get("X-Response-ID")) {
+    if let Some(response_id) = response
+        .headers
+        .as_ref()
+        .and_then(|h| h.get("X-Response-ID"))
+    {
         println!("Response ID: {}", response_id);
     }
     // NATS-DOC-END

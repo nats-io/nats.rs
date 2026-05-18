@@ -1,4 +1,3 @@
-use async_nats;
 use std::time::Duration;
 
 #[tokio::main]
