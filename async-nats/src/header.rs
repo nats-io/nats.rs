@@ -816,6 +816,9 @@ impl std::fmt::Display for ParseHeaderNameError {
 impl std::error::Error for ParseHeaderNameError {}
 
 fn validate_header_name(s: &str) -> Result<(), ParseHeaderNameError> {
+    // TODO: `c as u8` truncates non-ASCII codepoints to their low 8 bits, so chars
+    // like U+0121 (0x21 after truncation) slip through as valid. Compare against
+    // `c as u32` (or use `c.is_ascii()` + `c.is_ascii_graphic()`) in a follow-up.
     if s.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
         Err(ParseHeaderNameError)
     } else {
