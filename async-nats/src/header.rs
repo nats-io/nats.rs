@@ -742,6 +742,7 @@ impl FromStr for HeaderName {
     }
 }
 
+/// Fallible conversion from a borrowed string slice; validates the name without panicking.
 impl TryFrom<&str> for HeaderName {
     type Error = ParseHeaderNameError;
 
@@ -750,6 +751,8 @@ impl TryFrom<&str> for HeaderName {
     }
 }
 
+/// Fallible conversion from an owned `String`; validates without panicking and
+/// avoids re-allocating the bytes when the result is a custom (non-standard) name.
 impl TryFrom<String> for HeaderName {
     type Error = ParseHeaderNameError;
 
