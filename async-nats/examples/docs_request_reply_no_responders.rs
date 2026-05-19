@@ -1,6 +1,6 @@
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
-    let client = async_nats::connect("localhost:4222").await?;
+    let client = async_nats::connect("nats://localhost:4222").await?;
 
     // NATS-DOC-START
     match client.request("no.such.service", "test".into()).await {

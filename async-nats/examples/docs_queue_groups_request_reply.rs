@@ -29,20 +29,13 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // Make requests - automatically load balanced
     for i in 0..10 {
-        match client
+        let response = client
             .request(
                 "api.calculate",
                 format!("{{\"a\": {}, \"b\": {}}}", i, i * 2).into(),
             )
-            .await
-        {
-            Ok(response) => {
-                println!("Response: {}", String::from_utf8_lossy(&response.payload));
-            }
-            Err(e) => {
-                eprintln!("Request failed: {}", e);
-            }
-        }
+            .await?;
+        println!("Response: {}", String::from_utf8_lossy(&response.payload));
     }
     // NATS-DOC-END
 

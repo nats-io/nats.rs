@@ -19,14 +19,8 @@ async fn main() -> Result<(), async_nats::Error> {
     });
 
     // Make a request
-    match client.request("time", "".into()).await {
-        Ok(response) => {
-            println!("Response: {}", String::from_utf8_lossy(&response.payload));
-        }
-        Err(e) => {
-            eprintln!("Request failed: {}", e);
-        }
-    }
+    let response = client.request("time", "".into()).await?;
+    println!("Response: {}", String::from_utf8_lossy(&response.payload));
     // NATS-DOC-END
 
     Ok(())

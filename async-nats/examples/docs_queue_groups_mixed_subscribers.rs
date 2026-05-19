@@ -3,7 +3,7 @@ use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
-    let client = async_nats::connect("localhost:4222").await?;
+    let client = async_nats::connect("nats://localhost:4222").await?;
 
     // NATS-DOC-START
     // Audit logger - receives all messages

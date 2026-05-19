@@ -1,6 +1,5 @@
 use async_nats::jetstream::{self, consumer::PullConsumer, stream::StorageType};
-use futures_util::StreamExt;
-use std::str::from_utf8;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
@@ -43,7 +42,7 @@ async fn main() -> Result<(), async_nats::Error> {
         println!(
             "Received on {}: {}",
             message.subject,
-            from_utf8(&message.payload)?
+            String::from_utf8_lossy(&message.payload)
         );
         message.ack().await?;
     }

@@ -29,17 +29,11 @@ async fn main() -> Result<(), async_nats::Error> {
     });
 
     // Gets one response
-    match client.request("calc.add", "data".into()).await {
-        Ok(response) => {
-            println!(
-                "Got response: {}",
-                String::from_utf8_lossy(&response.payload)
-            );
-        }
-        Err(e) => {
-            eprintln!("Request failed: {}", e);
-        }
-    }
+    let response = client.request("calc.add", "data".into()).await?;
+    println!(
+        "Got response: {}",
+        String::from_utf8_lossy(&response.payload)
+    );
     // NATS-DOC-END
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

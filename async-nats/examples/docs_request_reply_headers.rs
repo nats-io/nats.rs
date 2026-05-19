@@ -3,21 +3,22 @@ use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
-    let client = async_nats::connect("localhost:4222").await?;
+    let client = async_nats::connect("nats://localhost:4222").await?;
 
-    // Service that echoes back with a response header
+    // Service that reads the request id from the headers and echoes it back
     let mut sub = client.subscribe("service").await?;
     let service_client = client.clone();
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                let mut headers = HeaderMap::new();
-                headers.insert("X-Response-ID", "abc");
-                service_client
-                    .publish_with_headers(reply, headers, msg.payload)
-                    .await
-                    .ok();
+            let Some(reply) = msg.reply else { continue };
+            let mut headers = HeaderMap::new();
+            if let Some(request_id) = msg.headers.as_ref().and_then(|h| h.get("X-Request-ID")) {
+                headers.insert("X-Response-ID", request_id.as_str());
             }
+            service_client
+                .publish_with_headers(reply, headers, msg.payload)
+                .await
+                .ok();
         }
     });
 
