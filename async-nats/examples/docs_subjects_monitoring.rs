@@ -19,9 +19,6 @@ async fn main() -> Result<(), async_nats::Error> {
         }
     });
 
-    // Make sure the subscription is on the server before publishing
-    client.flush().await?;
-
     // Publish to a few subjects so the monitor has something to print
     client.publish("orders.new", "Order 1".into()).await?;
     client

@@ -27,9 +27,6 @@ async fn main() -> Result<(), async_nats::Error> {
         }
     });
 
-    // Make sure the subscription is on the server before we send requests
-    client.flush().await?;
-
     // Make calculations
     let resp = client.request("calc.add", "5 3".into()).await?;
     println!("5 + 3 = {}", String::from_utf8_lossy(&resp.payload));
