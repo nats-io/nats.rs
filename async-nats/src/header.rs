@@ -740,6 +740,33 @@ impl FromStr for HeaderName {
     }
 }
 
+impl TryFrom<&str> for HeaderName {
+    type Error = ParseHeaderNameError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl TryFrom<String> for HeaderName {
+    type Error = ParseHeaderNameError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
+            return Err(ParseHeaderNameError);
+        }
+
+        match StandardHeader::from_bytes(value.as_bytes()) {
+            Some(v) => Ok(HeaderName {
+                inner: HeaderRepr::Standard(v),
+            }),
+            None => Ok(HeaderName {
+                inner: HeaderRepr::Custom(CustomHeader::from(value)),
+            }),
+        }
+    }
+}
+
 impl fmt::Display for HeaderName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.as_str(), f)
@@ -1162,6 +1189,27 @@ mod tests {
         let _: HeaderValue = "value with special chars !@#$%^&*()".into();
         let _: HeaderValue = "".into();
         let _: HeaderValue = String::from("string value").into();
+    }
+
+    #[test]
+    fn header_name_try_from_str() {
+        assert_eq!(
+            HeaderName::try_from("X-Custom").unwrap().as_str(),
+            "X-Custom"
+        );
+        assert!(HeaderName::try_from("Bad Name").is_err());
+        assert!(HeaderName::try_from("Bad:Name").is_err());
+    }
+
+    #[test]
+    fn header_name_try_from_string() {
+        assert_eq!(
+            HeaderName::try_from("Nats-Stream".to_string())
+                .unwrap()
+                .as_str(),
+            "Nats-Stream"
+        );
+        assert!(HeaderName::try_from("Bad\nName".to_string()).is_err());
     }
 
     #[test]
