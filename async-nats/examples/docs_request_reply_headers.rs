@@ -1,8 +1,25 @@
 use async_nats::HeaderMap;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("localhost:4222").await?;
+
+    // Service that echoes back with a response header
+    let mut sub = client.subscribe("service").await?;
+    let service_client = client.clone();
+    tokio::spawn(async move {
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let mut headers = HeaderMap::new();
+                headers.insert("X-Response-ID", "abc");
+                service_client
+                    .publish_with_headers(reply, headers, msg.payload)
+                    .await
+                    .ok();
+            }
+        }
+    });
 
     // NATS-DOC-START
     // Create message with headers

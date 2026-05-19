@@ -7,6 +7,9 @@ async fn main() -> Result<(), async_nats::Error> {
     let nc = async_nats::connect("nats://localhost:4222").await?;
     let js = jetstream::new(nc);
 
+    // Start clean so re-runs are deterministic
+    js.delete_stream("ORDERS").await.ok();
+
     // NATS-DOC-START
     // Create a stream that captures any subject under `orders.`
     let stream = js

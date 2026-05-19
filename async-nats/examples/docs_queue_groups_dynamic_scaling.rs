@@ -42,6 +42,14 @@ async fn main() -> Result<(), async_nats::Error> {
         workers.push(worker);
     }
 
+    // Publish tasks - load balanced across workers
+    for i in 1..=10 {
+        client
+            .publish("tasks", format!("task-{}", i).into())
+            .await?;
+    }
+    sleep(Duration::from_millis(200)).await;
+
     // Scale down
     if let Some(worker) = workers.pop() {
         println!("Stopping worker {}", worker.id);
