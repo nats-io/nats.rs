@@ -372,10 +372,7 @@ impl FromStr for HeaderValue {
     type Err = ParseHeaderValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(['\r', '\n']) {
-            return Err(ParseHeaderValueError);
-        }
-
+        validate_header_value(s)?;
         Ok(HeaderValue {
             inner: s.to_string(),
         })
@@ -385,7 +382,7 @@ impl FromStr for HeaderValue {
 impl From<&str> for HeaderValue {
     fn from(v: &str) -> Self {
         assert!(
-            !v.contains(['\r', '\n']),
+            validate_header_value(v).is_ok(),
             "invalid header value: cannot contain '\\r' or '\\n'"
         );
         Self {
@@ -397,7 +394,7 @@ impl From<&str> for HeaderValue {
 impl From<String> for HeaderValue {
     fn from(inner: String) -> Self {
         assert!(
-            !inner.contains(['\r', '\n']),
+            validate_header_value(&inner).is_ok(),
             "invalid header value: cannot contain '\\r' or '\\n'"
         );
         Self { inner }
@@ -428,6 +425,14 @@ impl fmt::Display for ParseHeaderValueError {
 
 impl std::error::Error for ParseHeaderValueError {}
 
+fn validate_header_value(s: &str) -> Result<(), ParseHeaderValueError> {
+    if s.contains(['\r', '\n']) {
+        Err(ParseHeaderValueError)
+    } else {
+        Ok(())
+    }
+}
+
 pub trait IntoHeaderName {
     fn into_header_name(self) -> HeaderName;
 }
@@ -435,7 +440,7 @@ pub trait IntoHeaderName {
 impl IntoHeaderName for &str {
     fn into_header_name(self) -> HeaderName {
         assert!(
-            !self.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126),
+            validate_header_name(self).is_ok(),
             "invalid header name: cannot contain control characters, non-ASCII, or ':'"
         );
         match StandardHeader::from_bytes(self.as_bytes()) {
@@ -452,7 +457,7 @@ impl IntoHeaderName for &str {
 impl IntoHeaderName for String {
     fn into_header_name(self) -> HeaderName {
         assert!(
-            !self.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126),
+            validate_header_name(&self).is_ok(),
             "invalid header name: cannot contain control characters, non-ASCII, or ':'"
         );
         match StandardHeader::from_bytes(self.as_bytes()) {
@@ -725,18 +730,42 @@ impl FromStr for HeaderName {
     type Err = ParseHeaderNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
-            return Err(ParseHeaderNameError);
-        }
-
-        match StandardHeader::from_bytes(s.as_ref()) {
-            Some(v) => Ok(HeaderName {
+        validate_header_name(s)?;
+        Ok(match StandardHeader::from_bytes(s.as_bytes()) {
+            Some(v) => HeaderName {
                 inner: HeaderRepr::Standard(v),
-            }),
-            None => Ok(HeaderName {
+            },
+            None => HeaderName {
                 inner: HeaderRepr::Custom(CustomHeader::from(s)),
-            }),
-        }
+            },
+        })
+    }
+}
+
+/// Fallible conversion from a borrowed string slice; validates the name without panicking.
+impl TryFrom<&str> for HeaderName {
+    type Error = ParseHeaderNameError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+/// Fallible conversion from an owned `String`; validates without panicking and
+/// avoids re-allocating the bytes when the result is a custom (non-standard) name.
+impl TryFrom<String> for HeaderName {
+    type Error = ParseHeaderNameError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        validate_header_name(&value)?;
+        Ok(match StandardHeader::from_bytes(value.as_bytes()) {
+            Some(v) => HeaderName {
+                inner: HeaderRepr::Standard(v),
+            },
+            None => HeaderName {
+                inner: HeaderRepr::Custom(CustomHeader::from(value)),
+            },
+        })
     }
 }
 
@@ -788,6 +817,14 @@ impl std::fmt::Display for ParseHeaderNameError {
 }
 
 impl std::error::Error for ParseHeaderNameError {}
+
+fn validate_header_name(s: &str) -> Result<(), ParseHeaderNameError> {
+    if s.contains(|c: char| !c.is_ascii_graphic() || c == ':') {
+        Err(ParseHeaderNameError)
+    } else {
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1162,6 +1199,27 @@ mod tests {
         let _: HeaderValue = "value with special chars !@#$%^&*()".into();
         let _: HeaderValue = "".into();
         let _: HeaderValue = String::from("string value").into();
+    }
+
+    #[test]
+    fn header_name_try_from_str() {
+        assert_eq!(
+            HeaderName::try_from("X-Custom").unwrap().as_str(),
+            "X-Custom"
+        );
+        assert!(HeaderName::try_from("Bad Name").is_err());
+        assert!(HeaderName::try_from("Bad:Name").is_err());
+    }
+
+    #[test]
+    fn header_name_try_from_string() {
+        assert_eq!(
+            HeaderName::try_from("Nats-Stream".to_string())
+                .unwrap()
+                .as_str(),
+            "Nats-Stream"
+        );
+        assert!(HeaderName::try_from("Bad\nName".to_string()).is_err());
     }
 
     #[test]
