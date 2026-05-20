@@ -15,8 +15,7 @@ async fn main() -> Result<(), async_nats::Error> {
 
         tokio::spawn(async move {
             while let Some(msg) = sub.next().await {
-                // Parse request (simplified)
-                let response = format!("{{\"result\": 42, \"processedBy\": \"{}\"}}", instance_id);
+                let response = format!("handled by {}", instance_id);
 
                 if let Some(reply) = msg.reply {
                     client.publish(reply, response.into()).await.ok();
@@ -30,10 +29,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // Make requests - automatically load balanced
     for i in 0..10 {
         let response = client
-            .request(
-                "api.calculate",
-                format!("{{\"a\": {}, \"b\": {}}}", i, i * 2).into(),
-            )
+            .request("api.calculate", format!("request {}", i).into())
             .await?;
         println!("Response: {}", String::from_utf8_lossy(&response.payload));
     }

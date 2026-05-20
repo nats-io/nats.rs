@@ -19,19 +19,23 @@ async fn main() -> Result<(), async_nats::Error> {
     });
 
     // NATS-DOC-START
-    // Request with custom timeout
+    // Request with custom timeout.
+    // `tokio::time::timeout` returns Ok(request_result) or Err(Elapsed).
     match tokio::time::timeout(
         Duration::from_secs(2),
         client.request("service", "data".into()),
     )
     .await
     {
+        // Request succeeded
         Ok(Ok(response)) => {
             println!("Response: {}", String::from_utf8_lossy(&response.payload));
         }
+        // Request failed (e.g. no responders)
         Ok(Err(e)) => {
             eprintln!("Request failed: {}", e);
         }
+        // Timed out
         Err(_) => {
             println!("Request timed out");
         }
