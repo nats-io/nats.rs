@@ -70,6 +70,13 @@ pub struct ConnectOptions {
     pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    /// Optional HTTP headers to inject on the WebSocket upgrade
+    /// request — only honoured by the `ws://` / `wss://` connector
+    /// arms; ignored on `nats://` / `tls://` schemes (no HTTP
+    /// upgrade in that codepath). Default empty; set via
+    /// [`ConnectOptions::websocket_headers`].
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: http::HeaderMap,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -126,6 +133,8 @@ impl Default for ConnectOptions {
             skip_subject_validation: false,
             local_address: None,
             reconnect_to_server_callback: None,
+            #[cfg(feature = "websockets")]
+            websocket_headers: http::HeaderMap::new(),
         }
     }
 }
@@ -1037,6 +1046,55 @@ impl ConnectOptions {
     /// ```
     pub fn local_address(mut self, address: SocketAddr) -> ConnectOptions {
         self.local_address = Some(address);
+        self
+    }
+
+    /// Set custom HTTP headers to inject on the WebSocket upgrade
+    /// request. Only honoured by the `ws://` / `wss://` connector
+    /// arms; ignored on `nats://` / `tls://` schemes (no HTTP
+    /// upgrade in that codepath).
+    ///
+    /// Use case: a reverse proxy in front of the NATS server (e.g.
+    /// nginx / Kong / Envoy) requires a `Cookie:` or `Authorization:`
+    /// header on the WS upgrade to validate the session before
+    /// proxying. Without a hook on the underlying
+    /// `tokio_websockets::client::Builder` there's no way to set
+    /// these.
+    ///
+    /// Each header in the supplied `HeaderMap` is forwarded via
+    /// `tokio_websockets::client::Builder::add_header` before the
+    /// upgrade request goes out. Protocol-required upgrade headers
+    /// (`Sec-WebSocket-Key`, `Upgrade`, `Connection`, `Host`,
+    /// `Sec-WebSocket-Version`) are owned by the WS client and
+    /// should not be passed here — `add_header` overwrites them
+    /// silently.
+    ///
+    /// Default is an empty `HeaderMap`; callers that don't touch
+    /// this method see identical behaviour to previous releases.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// # #[cfg(feature = "websockets")] {
+    /// use http::{HeaderMap, HeaderName, HeaderValue};
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// headers.insert(
+    ///     HeaderName::from_static("cookie"),
+    ///     HeaderValue::from_static("session=abc123"),
+    /// );
+    /// async_nats::ConnectOptions::new()
+    ///     .websocket_headers(headers)
+    ///     .connect("wss://gateway.example.com/nats")
+    ///     .await?;
+    /// # }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "websockets")]
+    pub fn websocket_headers(mut self, headers: http::HeaderMap) -> ConnectOptions {
+        self.websocket_headers = headers;
         self
     }
 }

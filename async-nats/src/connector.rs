@@ -154,6 +154,8 @@ pub(crate) struct ConnectorOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: http::HeaderMap,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -483,11 +485,15 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
+                let mut ws_builder = tokio_websockets::client::Builder::new()
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                for (name, value) in self.options.websocket_headers.iter() {
+                    ws_builder = ws_builder.add_header(name.clone(), value.clone());
+                }
+                let ws = ws_builder
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
@@ -502,12 +508,20 @@ impl Connector {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                // tokio_websockets::client::Builder::connector takes
+                // `&Connector`, so bind the rustls wrapper to a local
+                // first to satisfy the borrow lifetime.
+                let ws_connector = tokio_websockets::Connector::Rustls(tls_connector);
+                let mut ws_builder = tokio_websockets::client::Builder::new()
+                    .connector(&ws_connector)
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                for (name, value) in self.options.websocket_headers.iter() {
+                    ws_builder = ws_builder.add_header(name.clone(), value.clone());
+                }
+                let ws = ws_builder
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;

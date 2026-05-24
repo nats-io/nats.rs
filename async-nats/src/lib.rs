@@ -1063,6 +1063,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             max_reconnects: options.max_reconnects,
             local_address: options.local_address,
             reconnect_to_server_callback: options.reconnect_to_server_callback,
+            #[cfg(feature = "websockets")]
+            websocket_headers: options.websocket_headers,
         },
         events_tx,
         state_tx,
