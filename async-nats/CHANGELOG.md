@@ -1,3 +1,18 @@
+# v0.49.0
+## Overview
+
+This is a small release adding missing client-side max-payload validations for some methods.
+It is a minor release as it adds new error kind variants for relevant calls.
+
+## What's Changed
+* Add TryFrom impls for HeaderName by @yordis in https://github.com/nats-io/nats.rs/pull/1587
+* Add max payload validation where it was missing by @Jarema in https://github.com/nats-io/nats.rs/pull/1590
+
+## New Contributors
+* @scottf made their first contribution in https://github.com/nats-io/nats.rs/pull/1579
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.48.0...async-nats/v0.49.0
+
 # v0.48.0
 ## Added
 * Add recent jetstream error codes by @Jarema in https://github.com/nats-io/nats.rs/pull/1564
