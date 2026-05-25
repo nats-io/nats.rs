@@ -256,9 +256,9 @@ mod options;
 
 pub use auth::Auth;
 pub use client::{
-    Client, PublishError, Request, RequestError, RequestErrorKind, ServerPoolError,
-    ServerPoolErrorKind, SetServerPoolError, SetServerPoolErrorKind, Statistics, SubscribeError,
-    SubscribeErrorKind,
+    Client, PublishError, PublishErrorKind, Request, RequestError, RequestErrorKind,
+    ServerPoolError, ServerPoolErrorKind, SetServerPoolError, SetServerPoolErrorKind, Statistics,
+    SubscribeError, SubscribeErrorKind,
 };
 pub use options::{AuthError, ConnectOptions};
 

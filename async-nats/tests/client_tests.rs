@@ -1137,6 +1137,155 @@ mod client {
             .unwrap();
     }
 
+    // Client and server agree on the payload byte count: exactly `max_payload`
+    // round-trips intact; one byte more is rejected.
+    #[tokio::test]
+    async fn payload_size_boundary_matches_server() {
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let max = client.max_payload();
+        assert_eq!(max, 1024 * 128);
+
+        let mut sub = client.subscribe("boundary").await.unwrap();
+
+        // Exactly max_payload: accepted and delivered back with the same length.
+        client
+            .publish("boundary", vec![7u8; max].into())
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .expect("server dropped the exactly-max message")
+            .expect("subscription closed");
+        assert_eq!(msg.payload.len(), max);
+
+        // One byte over: rejected client-side before send...
+        let err = client
+            .publish("boundary", vec![7u8; max + 1].into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+
+        // ...and never delivered: the next message is the small "fence", not
+        // the oversized payload.
+        client.publish("boundary", "fence".into()).await.unwrap();
+        client.flush().await.unwrap();
+
+        let next = tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .expect("expected the fence message")
+            .expect("subscription closed");
+        assert_eq!(next.payload, Bytes::from("fence"));
+    }
+
+    #[tokio::test]
+    async fn publish_with_headers_payload_size() {
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let max = client.max_payload();
+        assert_eq!(max, 1024 * 128);
+
+        // Oversized payload must be rejected by every publish variant.
+        let big = || Bytes::from(vec![0u8; 1024 * 1024]);
+
+        let err = client
+            .publish_with_headers("big", async_nats::HeaderMap::new(), big())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+
+        let err = client
+            .publish_with_reply("big", "reply", big())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+
+        let err = client
+            .publish_with_reply_and_headers("big", "reply", async_nats::HeaderMap::new(), big())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+
+        // Headers count toward `max_payload`: payload at the limit + headers > limit.
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("Key", "Value");
+        let err = client
+            .publish_with_headers("at_limit", headers, vec![0u8; max].into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+    }
+
+    #[tokio::test]
+    async fn request_payload_size() {
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+        let client = async_nats::ConnectOptions::new()
+            .request_timeout(Some(Duration::from_secs(3)))
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        assert_eq!(client.max_payload(), 1024 * 128);
+
+        // Oversized requests fail fast with a typed error, not a timeout.
+        let err = client
+            .request("big", vec![0u8; 1024 * 1024].into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), RequestErrorKind::MaxPayloadExceeded);
+
+        let err = client
+            .request_with_headers(
+                "big",
+                async_nats::HeaderMap::new(),
+                vec![0u8; 1024 * 1024].into(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), RequestErrorKind::MaxPayloadExceeded);
+    }
+
+    #[tokio::test]
+    async fn publish_message_payload_size() {
+        use async_nats::client::traits::Publisher;
+        use async_nats::message::OutboundMessage;
+
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let err = client
+            .publish_message(OutboundMessage {
+                subject: "big".to_string().into(),
+                reply: None,
+                payload: vec![0u8; 1024 * 1024].into(),
+                headers: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+    }
+
+    #[tokio::test]
+    async fn sink_payload_size() {
+        use async_nats::message::OutboundMessage;
+        use futures_util::SinkExt;
+
+        let server = nats_server::run_server("tests/configs/max_payload.conf");
+        let mut client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let err = client
+            .send(OutboundMessage {
+                subject: "big".to_string().into(),
+                reply: None,
+                payload: vec![0u8; 1024 * 1024].into(),
+                headers: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), async_nats::PublishErrorKind::MaxPayloadExceeded);
+    }
+
     #[tokio::test]
     async fn client_statistics() {
         let server = nats_server::run_basic_server();

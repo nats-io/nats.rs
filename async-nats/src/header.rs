@@ -153,6 +153,19 @@ impl HeaderMap {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
+    /// Serialized byte length of this header block (as [`HeaderMap::to_bytes`]
+    /// produces), computed without allocating.
+    pub(crate) fn wire_len(&self) -> usize {
+        // Mirrors `to_bytes`: "NATS/1.0\r\n" + each "<key>: <value>\r\n" + "\r\n".
+        let mut len = b"NATS/1.0\r\n".len() + b"\r\n".len();
+        for (k, vs) in &self.inner {
+            for v in vs.iter() {
+                len += k.as_str().len() + b": ".len() + v.inner.len() + b"\r\n".len();
+            }
+        }
+        len
+    }
 }
 
 impl HeaderMap {
@@ -903,6 +916,19 @@ mod tests {
         let bytes = headers.to_bytes();
 
         println!("bytes: {:?}", from_utf8(&bytes));
+    }
+
+    #[test]
+    fn wire_len_matches_serialized() {
+        let mut headers = HeaderMap::new();
+        headers.append("Key", "value");
+        headers.append("Key", "second_value");
+        headers.insert("Second", "SecondValue");
+        assert_eq!(headers.wire_len(), headers.to_bytes().len());
+
+        // An empty block still serializes the framing bytes.
+        let empty = HeaderMap::new();
+        assert_eq!(empty.wire_len(), empty.to_bytes().len());
     }
 
     #[test]
