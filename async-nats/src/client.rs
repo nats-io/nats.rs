@@ -72,6 +72,19 @@ impl Display for PublishErrorKind {
     }
 }
 
+/// Shared error text for the max-payload errors, from `(max_payload, size)`.
+pub(crate) fn max_payload_message((max_payload, size): (usize, usize)) -> String {
+    format!("Payload size limit of {max_payload} exceeded by message size of {size}")
+}
+
+/// `map_err` helper turning a size violation into a [`PublishError`].
+fn max_payload_error(sizes: (usize, usize)) -> PublishError {
+    PublishError::with_source(
+        PublishErrorKind::MaxPayloadExceeded,
+        max_payload_message(sizes),
+    )
+}
+
 /// Client is a `Cloneable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [crate::connect] and [crate::ConnectOptions::connect]
@@ -176,6 +189,8 @@ impl traits::Publisher for Client {
                 crate::subject::SubjectError::InvalidFormat,
             ));
         }
+        self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
+            .map_err(max_payload_error)?;
         self.sender
             .send(Command::Publish(msg))
             .await
@@ -200,6 +215,8 @@ impl Sink<OutboundMessage> for Client {
     }
 
     fn start_send(mut self: Pin<&mut Self>, msg: OutboundMessage) -> Result<(), Self::Error> {
+        self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
+            .map_err(max_payload_error)?;
         self.poll_sender
             .start_send_unpin(Command::Publish(msg))
             .map_err(Into::into)
@@ -345,6 +362,26 @@ impl Client {
         self.max_payload.load(Ordering::Relaxed)
     }
 
+    /// Checks the wire size (serialized headers + payload, matching the server's
+    /// `HPUB` total) against the negotiated `max_payload`. On violation returns
+    /// `(max_payload, size)` for the caller to wrap in its own error.
+    pub(crate) fn check_payload_size(
+        &self,
+        headers: Option<&HeaderMap>,
+        payload_len: usize,
+    ) -> Result<(), (usize, usize)> {
+        let max_payload = self.max_payload.load(Ordering::Relaxed);
+        let size = match headers {
+            Some(headers) if !headers.is_empty() => headers.wire_len() + payload_len,
+            _ => payload_len,
+        };
+        if size > max_payload {
+            Err((max_payload, size))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Returns true if the server version is compatible with the version components.
     ///
     /// This has to be used with caution, as it is not guaranteed that the server
@@ -418,17 +455,8 @@ impl Client {
             .maybe_validate_publish_subject(subject)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
-        let max_payload = self.max_payload.load(Ordering::Relaxed);
-        if payload.len() > max_payload {
-            return Err(PublishError::with_source(
-                PublishErrorKind::MaxPayloadExceeded,
-                format!(
-                    "Payload size limit of {} exceeded by message size of {}",
-                    max_payload,
-                    payload.len(),
-                ),
-            ));
-        }
+        self.check_payload_size(None, payload.len())
+            .map_err(max_payload_error)?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -470,6 +498,9 @@ impl Client {
             .maybe_validate_publish_subject(subject)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
+        self.check_payload_size(Some(&headers), payload.len())
+            .map_err(max_payload_error)?;
+
         self.sender
             .send(Command::Publish(OutboundMessage {
                 subject,
@@ -509,6 +540,9 @@ impl Client {
         let reply = self
             .maybe_validate_publish_subject(reply)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
+
+        self.check_payload_size(None, payload.len())
+            .map_err(max_payload_error)?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -552,6 +586,9 @@ impl Client {
         let reply = self
             .maybe_validate_publish_subject(reply)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
+
+        self.check_payload_size(Some(&headers), payload.len())
+            .map_err(max_payload_error)?;
 
         self.sender
             .send(Command::Publish(OutboundMessage {
@@ -633,6 +670,18 @@ impl Client {
         let subject = self
             .maybe_validate_publish_subject(subject)
             .map_err(|e| RequestError::with_source(RequestErrorKind::InvalidSubject, e))?;
+
+        // Reject oversized requests up front, else they'd be sent and time out.
+        self.check_payload_size(
+            request.headers.as_ref(),
+            request.payload.as_ref().map_or(0, Bytes::len),
+        )
+        .map_err(|sizes| {
+            RequestError::with_source(
+                RequestErrorKind::MaxPayloadExceeded,
+                max_payload_message(sizes),
+            )
+        })?;
 
         if let Some(inbox) = request.inbox {
             let timeout = request.timeout.unwrap_or(self.request_timeout);
@@ -1225,6 +1274,8 @@ pub enum RequestErrorKind {
     NoResponders,
     /// The subject is invalid (empty or contains whitespace).
     InvalidSubject,
+    /// The payload (plus headers) exceeds the server's `max_payload`.
+    MaxPayloadExceeded,
     /// Other errors, client/io related.
     Other,
 }
@@ -1235,6 +1286,7 @@ impl Display for RequestErrorKind {
             Self::TimedOut => write!(f, "request timed out"),
             Self::NoResponders => write!(f, "no responders"),
             Self::InvalidSubject => write!(f, "invalid subject"),
+            Self::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
             Self::Other => write!(f, "request failed"),
         }
     }

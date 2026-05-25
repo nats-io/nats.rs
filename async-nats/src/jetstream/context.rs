@@ -485,6 +485,22 @@ impl Context {
         subject: S,
         publish: PublishMessage,
     ) -> Result<PublishAckFuture, PublishError> {
+        let subject = self
+            .client
+            .maybe_validate_publish_subject(subject)
+            .map_err(|e| PublishError::with_source(PublishErrorKind::Other, e))?;
+
+        // Reject oversized messages before taking an ack permit, else the
+        // publish is sent and we wait for an ack that never arrives.
+        self.client
+            .check_payload_size(publish.headers.as_ref(), publish.payload.len())
+            .map_err(|sizes| {
+                PublishError::with_source(
+                    PublishErrorKind::MaxPayloadExceeded,
+                    crate::client::max_payload_message(sizes),
+                )
+            })?;
+
         let permit = if self.backpressure_on_inflight {
             // When backpressure is enabled, wait for a permit to become available
             self.max_ack_semaphore
@@ -504,10 +520,7 @@ impl Context {
                     _ => PublishError::with_source(PublishErrorKind::Other, err),
                 })?
         };
-        let subject = self
-            .client
-            .maybe_validate_publish_subject(subject)
-            .map_err(|e| PublishError::with_source(PublishErrorKind::Other, e))?;
+
         let (sender, receiver) = oneshot::channel();
 
         let respond = self.client.new_inbox().into();
@@ -1826,6 +1839,8 @@ pub enum PublishErrorKind {
     TimedOut,
     BrokenPipe,
     MaxAckPending,
+    /// The message (payload plus headers) exceeds the server's `max_payload`.
+    MaxPayloadExceeded,
     Other,
 }
 
@@ -1839,6 +1854,7 @@ impl Display for PublishErrorKind {
             Self::WrongLastMessageId => write!(f, "wrong last message id"),
             Self::WrongLastSequence => write!(f, "wrong last sequence"),
             Self::MaxAckPending => write!(f, "max ack pending reached"),
+            Self::MaxPayloadExceeded => write!(f, "max payload size exceeded"),
         }
     }
 }
@@ -2107,7 +2123,7 @@ impl From<crate::RequestError> for RequestError {
             crate::RequestErrorKind::InvalidSubject => {
                 RequestError::with_source(RequestErrorKind::InvalidSubject, error)
             }
-            crate::RequestErrorKind::Other => {
+            crate::RequestErrorKind::MaxPayloadExceeded | crate::RequestErrorKind::Other => {
                 RequestError::with_source(RequestErrorKind::Other, error)
             }
         }

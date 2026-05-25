@@ -104,6 +104,41 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn publish_payload_size() {
+        let server = nats_server::run_server("tests/configs/jetstream_max_payload.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        assert_eq!(client.max_payload(), 1024 * 128);
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "TEST".into(),
+                subjects: vec!["foo".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Oversized publish fails fast with a typed error, not an ack timeout.
+        let err = context
+            .publish("foo", vec![0u8; 1024 * 1024].into())
+            .await
+            .unwrap_err()
+            .kind();
+        assert_eq!(err, PublishErrorKind::MaxPayloadExceeded);
+
+        // Headers count toward the limit too.
+        let mut headers = HeaderMap::new();
+        headers.insert("Key", "Value");
+        let err = context
+            .publish_with_headers("foo", headers, vec![0u8; 1024 * 128].into())
+            .await
+            .unwrap_err()
+            .kind();
+        assert_eq!(err, PublishErrorKind::MaxPayloadExceeded);
+    }
+
+    #[tokio::test]
     async fn publish_async() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
