@@ -41,7 +41,8 @@ ring = { version = "0.17", optional = true }
 rand = "0.10.1"
 rustls-webpki = { package = "rustls-webpki", default-features = false, version = "0.103.10" }
 portable-atomic = "1"
-tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-webpki-roots"], optional = true }
+tokio-websockets = { version = "0.13", default-features = false, features = ["client", "rand", "rustls-webpki-roots"],  optional = true }
+http = { version = "1", default-features = false, features = ["std"], optional = true }
 pin-project = "1.0"
 
 [dev-dependencies]
@@ -68,8 +69,8 @@ kv = ["jetstream"]
 object-store = ["jetstream", "crypto"]
 service = ["dep:time", "dep:serde_nanos"]
 crypto = []
-websockets = ["dep:tokio-websockets"]
-aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+websockets = ["dep:tokio-websockets", "dep:http"]
+aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws_lc_rs", "rustls-webpki/aws-lc-rs"]
 ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets?/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
 nkeys = ["dep:nkeys", "dep:base64"]
