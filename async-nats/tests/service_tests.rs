@@ -15,6 +15,7 @@
 mod service {
     use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};
+    use async_nats::rustls;
     use futures_util::StreamExt;
     use jsonschema::Validator as JSONSchema;
     use std::error::Error;
@@ -515,6 +516,8 @@ mod service {
 
     #[tokio::test]
     async fn schemas() {
+        rustls::crypto::ring::default_provider().install_default().unwrap();
+
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
