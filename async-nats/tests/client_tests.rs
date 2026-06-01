@@ -1776,4 +1776,102 @@ mod client {
 
         handle.abort();
     }
+
+    // Regression test for https://github.com/nats-io/nats.rs/issues/1593.
+    //
+    // A silent (network-partitioned) server must be detected via the client-origin
+    // PING/PONG keepalive even when the client keeps publishing faster than the
+    // configured `ping_interval`. Previously, every outgoing command reset the ping
+    // interval, so a publish loop faster than `ping_interval` starved the keepalive
+    // timer: no PING was ever sent, `pending_pings` never grew, and the disconnect
+    // was never detected.
+    #[tokio::test]
+    async fn ping_not_starved_by_frequent_publishes() {
+        // Mock server: complete the handshake (INFO + a single PONG), then go silent —
+        // keep draining the client's writes (so publishes never block on a full buffer)
+        // but never answer another PING. This emulates a partitioned/paused server whose
+        // TCP socket stays open.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (mut stream, _peer) = listener.accept().await.unwrap();
+            let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{},\"max_payload\":1048576}}\r\n", addr.port());
+            stream.write_all(info.as_bytes()).await.unwrap();
+
+            let mut buf = [0u8; 1024];
+            let mut handshake_ponged = false;
+            loop {
+                let n = match stream.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                // Answer only the handshake PING so `connect()` succeeds. Afterwards
+                // stay silent: drain and discard everything, never sending another PONG.
+                if !handshake_ponged && buf[..n].windows(6).any(|w| w == b"PING\r\n") {
+                    stream.write_all(b"PONG\r\n").await.unwrap();
+                    handshake_ponged = true;
+                }
+            }
+        });
+
+        const PING_INTERVAL: Duration = Duration::from_millis(500);
+
+        let (disc_tx, mut disc_rx) = tokio::sync::mpsc::channel::<()>(1);
+        let client = ConnectOptions::new()
+            .ping_interval(PING_INTERVAL)
+            .event_callback(move |event| {
+                let disc_tx = disc_tx.clone();
+                async move {
+                    if let Event::Disconnected = event {
+                        disc_tx.try_send(()).ok();
+                    }
+                }
+            })
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await
+            .unwrap();
+
+        // Publish much faster than `ping_interval` (every 50ms vs 500ms), and keep
+        // doing so for the whole detection window — the bug is that each publish reset
+        // the ping timer, so the starvation only manifests while publishes are in flight.
+        let publishes = Arc::new(AtomicU64::new(0));
+        let publisher = client.clone();
+        let pub_count = publishes.clone();
+        let pub_task = tokio::spawn(async move {
+            loop {
+                if publisher.publish("foo", "data".into()).await.is_ok() {
+                    pub_count.fetch_add(1, Ordering::Relaxed);
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+
+        // With a healthy keepalive, the silent server is detected within a few ping
+        // intervals (MAX_PENDING_PINGS = 2 → ~1.5s). Allow generous slack for CI.
+        let start = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(10), disc_rx.recv()).await;
+        let elapsed = start.elapsed();
+
+        pub_task.abort();
+        handle.abort();
+
+        assert!(
+            result.is_ok(),
+            "disconnect from a silent server was never detected while publishing \
+             faster than ping_interval (ping keepalive starved)"
+        );
+        // The starvation precondition must have actually held: many publishes succeeded,
+        // each faster than the ping interval.
+        assert!(
+            publishes.load(Ordering::Relaxed) > 5,
+            "publish loop did not run fast enough to exercise the bug"
+        );
+        // Detection must come from the keepalive timer, not an instantaneous I/O error:
+        // it cannot fire before at least one full ping interval has elapsed.
+        assert!(
+            elapsed >= PING_INTERVAL,
+            "disconnected too early ({elapsed:?}) to be the ping keepalive"
+        );
+    }
 }
