@@ -13,6 +13,7 @@
 
 //! A wrapped `crate::Message` with `JetStream` related methods.
 use super::context::Context;
+use crate::datetime::{self, DateTime};
 use crate::header::{IntoHeaderName, IntoHeaderValue};
 use crate::subject::ToSubject;
 use crate::{error, header, message, Error, HeaderValue};
@@ -22,7 +23,6 @@ use futures_util::future::TryFutureExt;
 use futures_util::StreamExt;
 use std::fmt::Display;
 use std::{mem, time::Duration};
-use crate::datetime::{self, DateTime};
 
 /// A message received directly from the stream, without leveraging a consumer.
 #[derive(Debug, Clone)]

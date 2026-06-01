@@ -36,9 +36,9 @@ use super::consumer::{DeliverPolicy, StreamError, StreamErrorKind};
 use super::context::{PublishError, PublishErrorKind};
 use super::stream::{self, ConsumerError, ConsumerErrorKind, PurgeError, PurgeErrorKind};
 use super::{consumer::push::Ordered, stream::StorageType};
+use crate::datetime::{self, rfc3339, DateTime};
 use crate::error::Error;
 use crate::header::NATS_ROLLUP;
-use crate::datetime::{self, rfc3339, DateTime};
 
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 const ROLLUP_SUBJECT: &str = "sub";

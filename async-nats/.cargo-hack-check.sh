@@ -25,6 +25,11 @@ cargo check --no-default-features --features kv,ring
 cargo check --no-default-features --features object-store,ring
 # Full stack without server flags
 cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,ring
+# chrono backend
+cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,chrono,ring
+# chrono without jetstream/service (dead-code guard for the chrono rfc3339 adapter)
+cargo check --no-default-features --features chrono,ring
+cargo check --no-default-features --features chrono,service,ring
 # Default
 cargo check
 

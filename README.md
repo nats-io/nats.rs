@@ -46,6 +46,15 @@ stable, yet versioned <1.0.0, like `rustls`, which might introduce breaking chan
 
 Feature flags are Documented in `Cargo.toml` and can be viewed [here](https://docs.rs/crate/async-nats/latest/source/Cargo.toml.orig).
 
+##### Datetime backend (`time` vs `chrono`)
+
+JetStream and Service datetime fields use `time::OffsetDateTime` by default. Enabling the
+optional `chrono` feature switches the `async_nats::datetime::DateTime` type (and those fields)
+to `chrono::DateTime<chrono::Utc>`. Because Cargo unifies features across the whole dependency
+graph, enabling `chrono` *anywhere* in the graph selects it for every consumer of `async-nats`
+in that build — so an unexpected `time` vs `chrono` type mismatch usually means a dependency
+enabled `async-nats/chrono`.
+
 ---
 
 #### Client and Orbit

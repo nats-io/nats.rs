@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 
+use crate::datetime::{rfc3339, DateTime};
 use crate::{
     error::Error, header::HeaderName, is_valid_subject, HeaderMap, HeaderValue, StatusCode,
 };
@@ -33,7 +34,6 @@ use bytes::Bytes;
 use futures_util::{future::BoxFuture, FutureExt, TryFutureExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use crate::datetime::{rfc3339, DateTime};
 
 use super::{
     consumer::{self, Consumer, FromConsumer, IntoConsumerConfig},
@@ -974,8 +974,9 @@ impl<I> Stream<I> {
     /// use futures_util::StreamExt;
     /// let client = async_nats::connect("localhost:4222").await?;
     /// let jetstream = async_nats::jetstream::new(client);
+    /// use async_nats::datetime;
     /// let pause_until =
-    ///     time::OffsetDateTime::now_utc().saturating_add(time::Duration::seconds_f32(10.0));
+    ///     datetime::add_std_duration(datetime::now(), std::time::Duration::from_secs(10))?;
     ///
     /// jetstream
     ///     .get_stream("events")
