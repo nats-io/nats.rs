@@ -19,9 +19,9 @@ pub mod push;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::datetime::{rfc3339, DateTime};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::datetime::{rfc3339, DateTime};
 
 use super::context::{ConsumerInfoError, RequestError};
 use super::response::Response;

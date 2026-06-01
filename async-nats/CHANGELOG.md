@@ -1,3 +1,11 @@
+# Unreleased
+## Added
+* Add an optional `chrono` feature as an alternative datetime backend to `time`. JetStream and
+  Service datetime fields are exposed through the `async_nats::datetime::DateTime` alias, which
+  is `time::OffsetDateTime` by default and `chrono::DateTime<chrono::Utc>` when the `chrono`
+  feature is enabled. The default build is unchanged. Note: enabling `chrono` anywhere in the
+  dependency graph selects the chrono backend for the whole build (Cargo feature unification).
+
 # v0.49.1
 ## Overview
 Release focusing on fixing behaviour around server connectivity.

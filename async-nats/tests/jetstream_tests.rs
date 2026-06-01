@@ -59,7 +59,6 @@ mod jetstream {
     use async_nats::jetstream::AckKind;
     use async_nats::{ConnectOptions, StatusCode};
     use futures_util::stream::{StreamExt, TryStreamExt};
-    use async_nats::datetime::DateTime;
     use tracing::debug;
 
     #[tokio::test]
@@ -4397,7 +4396,7 @@ mod jetstream {
         stream
             .pause_consumer(
                 "name",
-                datetime::add_std_duration(datetime::now(), Duration::from_secs(10)),
+                datetime::add_std_duration(datetime::now(), Duration::from_secs(10)).unwrap(),
             )
             .await
             .unwrap();
@@ -4414,7 +4413,7 @@ mod jetstream {
             .create_consumer(consumer::pull::Config {
                 durable_name: Some("blame".to_string()),
                 pause_until: Some(
-                    datetime::add_std_duration(datetime::now(), Duration::from_secs(3)),
+                    datetime::add_std_duration(datetime::now(), Duration::from_secs(3)).unwrap(),
                 ),
                 ..Default::default()
             })

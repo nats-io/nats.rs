@@ -214,6 +214,22 @@ jobs:
 
       - name: Run linter
         run: cargo clippy --benches --tests --examples --all-features  -- --deny clippy::all
+      # `--all-features` selects the chrono backend; also lint the default (time) backend,
+      # whose mutually-exclusive cfg arm is otherwise never clippy-checked.
+      - name: Run linter (default/time backend)
+        run: cargo clippy --benches --tests --examples -- --deny clippy::all
+      # Guard the chrono-without-jetstream/service combinations: the hand-written chrono
+      # rfc3339 adapter is unused there, which must not regress into a dead-code error
+      # under `-D warnings` (set at the workflow env level).
+      - name: Check chrono backend without jetstream/service
+        run: |
+          cargo check --no-default-features --features chrono,ring
+          cargo check --no-default-features --features chrono,service,ring
+      # `--all-features` enables `chrono`, which selects the chrono datetime backend, so
+      # the linter above lints the chrono code paths in src/datetime.rs. Run the chrono
+      # datetime unit tests explicitly, since the integration suite runs on the default backend.
+      - name: Run datetime unit tests (chrono backend)
+        run: cargo test --lib "datetime::" --features chrono
 
   check_docs:
     defaults:

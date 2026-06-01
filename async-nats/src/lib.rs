@@ -265,7 +265,11 @@ pub use options::{AuthError, ConnectOptions};
 #[cfg(feature = "crypto")]
 #[cfg_attr(docsrs, doc(cfg(feature = "crypto")))]
 mod crypto;
-#[cfg(any(feature = "time", feature = "chrono", feature = "jetstream", feature = "service"))]
+#[cfg(any(feature = "jetstream", feature = "service", feature = "chrono"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "jetstream", feature = "service", feature = "chrono")))
+)]
 pub mod datetime;
 
 pub mod error;

@@ -22,12 +22,12 @@ use std::{
     time::Duration,
 };
 
+use crate::datetime::DateTime;
 use crate::HeaderValue;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use regex::Regex;
 use std::sync::LazyLock;
-use crate::datetime::DateTime;
 use tracing::debug;
 
 use crate::error::Error;
