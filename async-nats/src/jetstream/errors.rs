@@ -709,6 +709,14 @@ impl Error {
     pub fn kind(&self) -> ErrorCode {
         self.err_code
     }
+
+    pub(crate) fn with_description_prefix(mut self, prefix: String) -> Self {
+        self.description = Some(match self.description {
+            Some(description) => format!("{prefix}: {description}"),
+            None => prefix,
+        });
+        self
+    }
 }
 
 impl fmt::Display for Error {
