@@ -1,3 +1,13 @@
+# v0.49.1
+## Overview
+Release focusing on fixing behaviour around server connectivity.
+
+## What's Changed
+* Fix ping interval reset by @Jarema in https://github.com/nats-io/nats.rs/pull/1594
+* Fix recreating ordered consumer on server restart by @Jarema in https://github.com/nats-io/nats.rs/pull/1599
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.49.0...async-nats/v0.49.1
+
 # v0.49.0
 ## Overview
 
