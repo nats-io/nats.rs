@@ -1661,6 +1661,76 @@ mod jetstream {
         }
     }
 
+    // Companion to #1596: the idle-heartbeat recreation must not discard messages that are
+    // already buffered in the subscription. If the application simply pauses for longer than the
+    // heartbeat window while the consumer is alive and has queued messages, resuming must deliver
+    // all of them in order without surfacing a (false) "missed idle heartbeat" — otherwise, with
+    // AckPolicy::None, those buffered messages can be lost on capped/discarding streams.
+    #[tokio::test]
+    async fn push_ordered_buffered_messages_survive_idle() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        context
+            .create_stream(stream::Config {
+                name: "bursts".into(),
+                subjects: vec!["bursts.>".into()],
+                storage: StorageType::File,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("bursts").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+
+        // Establish the consumer with one live delivery, then leave the heartbeat timer armed by
+        // forcing a poll that finds the channel empty (the timeout drives one `Pending` poll).
+        context.publish("bursts.1", "1".into()).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), messages.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.payload.as_ref(), b"1");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), messages.next())
+                .await
+                .is_err(),
+            "expected no further messages yet"
+        );
+
+        // Publish a burst, then pause longer than ORDERED_IDLE_HEARTBEAT * 2 (10s) without polling.
+        // The burst buffers in the subscription while the heartbeat deadline elapses.
+        for i in 2..=6 {
+            context
+                .publish(format!("bursts.{i}"), i.to_string().into())
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_secs(11)).await;
+
+        // Resuming must drain the whole buffered burst, in order, with no error.
+        for i in 2..=6 {
+            let message = tokio::time::timeout(Duration::from_secs(5), messages.next())
+                .await
+                .expect("timed out waiting for buffered message")
+                .expect("stream ended unexpectedly")
+                .expect("buffered message was dropped on a false heartbeat timeout");
+            assert_eq!(message.payload.as_ref(), i.to_string().as_bytes());
+            assert_eq!(message.info().unwrap().stream_sequence, i);
+        }
+    }
+
     // test added just to be sure, that if messages have arrived to the stream already, we won't
     // miss them in AckPolicy::None setup.
     #[tokio::test]
