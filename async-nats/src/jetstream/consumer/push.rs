@@ -562,6 +562,8 @@ impl futures_util::Stream for Ordered {
                     .is_ready()
             {
                 self.heartbeat_sleep = None;
+                self.subscriber = None;
+                self.consumer_sequence.store(0, Ordering::Relaxed);
                 return Poll::Ready(Some(Err(OrderedError::new(
                     OrderedErrorKind::MissingHeartbeat,
                 ))));

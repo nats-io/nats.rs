@@ -1583,6 +1583,84 @@ mod jetstream {
         }
     }
 
+    // Regression test for #1596: an ordered push consumer that is *not* being polled across a
+    // server restart must still recreate its consumer and resume delivery once polling resumes,
+    // instead of surfacing "missed idle heartbeat" and then hanging forever. The actively-polled
+    // path recovers via connection-state transitions (see `push_ordered_recreate`); the idle path
+    // can only recover via the idle-heartbeat monitor, which must trigger recreation.
+    #[tokio::test]
+    async fn push_ordered_recreate_after_idle_restart() {
+        let mut server =
+            nats_server::run_server_with_port("tests/configs/jetstream.conf", Some("5657"));
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events.>".into()],
+                storage: StorageType::File,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let stream = context.get_stream("events").await.unwrap();
+        let consumer: OrderedPushConsumer = stream
+            .create_consumer(consumer::push::OrderedConfig {
+                deliver_subject: "push".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+
+        // Warm the consumer with one live delivery so it has a known last sequence to resume from.
+        context.publish("events.1", "1".into()).await.unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(5), messages.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(message.info().unwrap().stream_sequence, 1);
+
+        // Restart the server while the consumer stream is idle (no `next()` in flight).
+        server.restart();
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if client.connection_state() == State::Connected {
+                break;
+            }
+        }
+
+        // Publish after the restart, then resume polling. Before the fix the first poll yields
+        // Err(MissingHeartbeat) and every subsequent poll hangs; the post-restart message is lost.
+        context.publish("events.2", "2".into()).await.unwrap();
+
+        // The missed-heartbeat error may surface once, but it must trigger consumer recreation
+        // rather than a terminal hang, so the post-restart message is eventually delivered.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "ordered consumer never recovered after an idle server restart"
+            );
+            match tokio::time::timeout(remaining, messages.next()).await {
+                Ok(Some(Ok(message))) => {
+                    if message.info().unwrap().stream_sequence == 2 {
+                        assert_eq!(message.payload.as_ref(), b"2");
+                        break;
+                    }
+                }
+                Ok(Some(Err(_))) => continue,
+                Ok(None) => panic!("ordered consumer stream ended unexpectedly"),
+                Err(_) => panic!("ordered consumer hung; never recovered after an idle restart"),
+            }
+        }
+    }
+
     // test added just to be sure, that if messages have arrived to the stream already, we won't
     // miss them in AckPolicy::None setup.
     #[tokio::test]
