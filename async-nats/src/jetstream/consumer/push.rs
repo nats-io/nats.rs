@@ -549,23 +549,6 @@ impl futures_util::Stream for Ordered {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            // Check heartbeat timer, but only if we have an active subscriber
-            // Don't check during recreation
-            if self.subscriber.is_some()
-                && self.subscriber_future.is_none()
-                && self
-                    .heartbeat_sleep
-                    .get_or_insert_with(|| {
-                        Box::pin(tokio::time::sleep(ORDERED_IDLE_HEARTBEAT.saturating_mul(2)))
-                    })
-                    .poll_unpin(cx)
-                    .is_ready()
-            {
-                self.heartbeat_sleep = None;
-                return Poll::Ready(Some(Err(OrderedError::new(
-                    OrderedErrorKind::MissingHeartbeat,
-                ))));
-            }
             // Poll for connection state changes
             match &mut self.state_change_future {
                 None => {
@@ -741,7 +724,39 @@ impl futures_util::Stream for Ordered {
                             }
                         }
                     }
-                    Poll::Pending => return Poll::Pending,
+                    Poll::Pending => {
+                        // The channel is drained. Only now consult the idle-heartbeat timer: a
+                        // live consumer keeps sending heartbeats well within the timeout, so an
+                        // empty channel past the deadline means the consumer is gone (e.g. the
+                        // server was restarted, or the consumer was deleted, while this stream
+                        // was idle). Recreate from the last delivered sequence instead of
+                        // erroring terminally and then hanging forever (#1596).
+                        //
+                        // Draining before this check is what makes it safe: if the application
+                        // merely paused while messages were still buffered, those are delivered
+                        // first (each resetting the timer), so a false timeout never discards
+                        // buffered messages. That matters because recreation resumes from the
+                        // last *delivered* sequence (AckPolicy::None), and on capped/discarding
+                        // streams the dropped messages might no longer be replayable.
+                        if self
+                            .heartbeat_sleep
+                            .get_or_insert_with(|| {
+                                Box::pin(tokio::time::sleep(
+                                    ORDERED_IDLE_HEARTBEAT.saturating_mul(2),
+                                ))
+                            })
+                            .poll_unpin(cx)
+                            .is_ready()
+                        {
+                            self.heartbeat_sleep = None;
+                            self.subscriber = None;
+                            self.consumer_sequence.store(0, Ordering::Relaxed);
+                            return Poll::Ready(Some(Err(OrderedError::new(
+                                OrderedErrorKind::MissingHeartbeat,
+                            ))));
+                        }
+                        return Poll::Pending;
+                    }
                 }
             }
         }
