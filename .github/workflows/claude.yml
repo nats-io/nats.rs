@@ -21,6 +21,9 @@ jobs:
     with:
       gh_app_id: ${{ vars.CLAUDE_GH_APP_ID }}
       checkout_mode: "base"
+      # Auto-review only for users with repo write access (admin/write/maintain).
+      # Empty = write access required; "*" = anyone (the v2 default).
+      review_allowed_non_write_users: ""
       review_focus: |
         Additionally focus on:
         - Safety issues (unsafe code, panics, unwraps in non-test code)
