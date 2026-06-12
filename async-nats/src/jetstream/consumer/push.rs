@@ -901,3 +901,9 @@ async fn recreate_ephemeral_consumer(
 
     Ok(())
 }
+
+crate::error::error_kinds!(
+    OrderedErrorKind,
+    MessagesErrorKind,
+    ConsumerRecreateErrorKind
+);

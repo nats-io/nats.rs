@@ -2907,3 +2907,15 @@ mod tests {
         assert_eq!(config, roundtrip);
     }
 }
+
+crate::error::error_kinds!(
+    DirectGetErrorKind,
+    DeleteMessageErrorKind,
+    PurgeErrorKind,
+    LastRawMessageErrorKind,
+    ConsumerErrorKind,
+    ConsumerCreateStrictErrorKind,
+    ConsumerUpdateErrorKind,
+);
+#[cfg(feature = "server_2_14")]
+crate::error::error_kinds!(ConsumerResetErrorKind);

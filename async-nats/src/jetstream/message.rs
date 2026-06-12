@@ -816,3 +816,5 @@ pub struct Info<'a> {
     /// Optional token, present in servers post-ADR-15
     pub token: Option<&'a str>,
 }
+
+crate::error::error_kinds!(StreamMessageErrorKind);

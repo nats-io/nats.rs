@@ -1344,3 +1344,12 @@ pub struct Statistics {
     /// Initial connect will be counted as well, then all successful reconnects.
     pub connects: AtomicU64,
 }
+
+crate::error::error_kinds!(
+    PublishErrorKind,
+    RequestErrorKind,
+    SubscribeErrorKind,
+    FlushErrorKind,
+    ServerPoolErrorKind,
+    SetServerPoolErrorKind,
+);

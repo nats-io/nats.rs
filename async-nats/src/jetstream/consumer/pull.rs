@@ -2831,3 +2831,11 @@ async fn recreate_consumer_stream(
     trace!("recreated consumer");
     stream
 }
+
+crate::error::error_kinds!(
+    OrderedErrorKind,
+    MessagesErrorKind,
+    BatchRequestErrorKind,
+    BatchErrorKind,
+    ConsumerRecreateErrorKind,
+);

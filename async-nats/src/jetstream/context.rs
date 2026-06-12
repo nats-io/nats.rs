@@ -2608,3 +2608,19 @@ fn kv_to_stream_config(
         ..Default::default()
     })
 }
+
+crate::error::error_kinds!(
+    PublishErrorKind,
+    RequestErrorKind,
+    ConsumerInfoErrorKind,
+    CreateStreamErrorKind,
+    GetStreamErrorKind,
+    GetStreamByNameErrorKind,
+    AccountErrorKind,
+);
+#[cfg(feature = "kv")]
+crate::error::error_kinds!(KeyValueErrorKind, UpdateKeyValueErrorKind);
+#[cfg(any(feature = "kv", feature = "object-store"))]
+crate::error::error_kinds!(CreateKeyValueErrorKind);
+#[cfg(feature = "object-store")]
+crate::error::error_kinds!(ObjectStoreErrorKind);
