@@ -103,9 +103,10 @@ where
 /// ```
 pub trait ErrorKind: Clone + Debug + Display + PartialEq {}
 
-/// Implements [`ErrorKind`] for the given types. Do not implement it as a blanket
-/// implementation over the required bounds; that would reintroduce the coherence
-/// hazard this trait exists to remove.
+/// Implements [`ErrorKind`] for the given types. Only list concrete kind types
+/// defined in this crate. Do not implement the trait for foreign types or as a
+/// blanket implementation over the required bounds; either would reintroduce the
+/// coherence hazard this trait exists to remove.
 macro_rules! error_kinds {
     ($($kind:ty),* $(,)?) => {
         $(impl $crate::error::ErrorKind for $kind {})*

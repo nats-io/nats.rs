@@ -1,4 +1,15 @@
 # Unreleased
+## Breaking changes
+* The generic `From<Kind> for Error<Kind>` conversion is now bounded by the new
+  `async_nats::error::ErrorKind` marker trait instead of plain
+  `Clone + Debug + Display + PartialEq`. The unbounded conversion conflicted (E0119) with
+  `time` 0.3.48 on Rust 1.84+ and any future dependency shipping a projection-self-type
+  `From` implementation could do the same. All built-in kind enums implement the marker, so
+  code using async-nats' own error types is unaffected. If you define custom kinds with
+  `async_nats::error::Error<MyKind>` and convert via `kind.into()`, add:
+  `impl async_nats::error::ErrorKind for MyKind {}`. `Error::new` and `Error::with_source`
+  are unchanged and need no migration.
+
 ## Added
 * Add an optional `chrono` feature as an alternative datetime backend to `time`. JetStream and
   Service datetime fields are exposed through the `async_nats::datetime::DateTime` alias, which
