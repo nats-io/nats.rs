@@ -231,6 +231,29 @@ jobs:
       - name: Run datetime unit tests (chrono backend)
         run: cargo test --lib "datetime::" --features chrono
 
+  check_features:
+    defaults:
+      run:
+        working-directory: ./async-nats
+    name: check feature flags (ubuntu-latest / stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Install stable Rust on ubuntu-latest
+        id:   install-rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Restore cached build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
+          save-if: false # checks only, no full build to cache.
+      - name: Install cargo hack
+        run: cargo install cargo-hack
+      - name: Check feature combinations
+        run: bash .cargo-hack-check.sh
+
   check_docs:
     defaults:
       run:

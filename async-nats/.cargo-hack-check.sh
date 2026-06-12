@@ -37,12 +37,19 @@ echo ""
 echo "=== Strategy 3: Test with aws-lc-rs backend ==="
 cargo check --no-default-features --features jetstream,kv,service,nkeys,aws-lc-rs
 cargo check --no-default-features --features aws-lc-rs
+# FIPS mode (implies aws-lc-rs)
+cargo check --no-default-features --features fips
 
 echo ""
 echo "=== Strategy 4: Test server version flags ==="
 cargo check --features server_2_10
 cargo check --features server_2_11
 cargo check --features server_2_12
+cargo check --features server_2_14
+
+echo ""
+echo "=== Strategy 5: Experimental ==="
+cargo check --features experimental
 
 echo ""
 echo "All checks passed!"
