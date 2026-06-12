@@ -59,6 +59,7 @@ jobs:
         working-directory: ./async-nats
     name: check feature flags (ubuntu-latest / stable)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
@@ -72,5 +73,5 @@ jobs:
           save-if: false # we only build docs, so we don't have the full build to be cached.
       - name: Install cargo hack
         run: cargo install cargo-hack
-      - name: Check lint
-        run: cargo hack check --feature-powerset --at-least-one-of aws-lc-rs,ring --no-dev-deps -p async-nats
+      - name: Check feature combinations
+        run: bash .cargo-hack-check.sh
