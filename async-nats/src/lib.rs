@@ -1930,3 +1930,5 @@ mod tests {
         }
     }
 }
+
+crate::error::error_kinds!(ConnectErrorKind);

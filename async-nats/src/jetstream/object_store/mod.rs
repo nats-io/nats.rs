@@ -1518,3 +1518,15 @@ impl From<OrderedError> for WatcherError {
 
 pub type ListerError = WatcherError;
 pub type ListerErrorKind = WatcherErrorKind;
+
+crate::error::error_kinds!(
+    UpdateMetadataErrorKind,
+    InfoErrorKind,
+    GetErrorKind,
+    DeleteErrorKind,
+    PutErrorKind,
+    AddLinkErrorKind,
+    WatchErrorKind,
+    SealErrorKind,
+    WatcherErrorKind,
+);

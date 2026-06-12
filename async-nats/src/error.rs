@@ -71,9 +71,52 @@ where
     }
 }
 
+/// Marker trait for types that can be used as the kind of [`Error`].
+///
+/// It bounds the `From<Kind> for Error<Kind>` conversion instead of the plain
+/// `Clone + Debug + Display + PartialEq` bounds: a `From` implementation generic
+/// over all types matching those bounds makes a universal coherence claim, which
+/// foreign crates can conflict with by adding implementations of their own
+/// (E0119, as `time` 0.3.48 did). A local marker trait cannot be implemented by
+/// upstream crates for their types, so the conversion provably never overlaps
+/// with foreign implementations.
+///
+/// Implement it for custom kinds used with [`Error`]:
+///
+/// ```
+/// use std::fmt::{self, Display, Formatter};
+///
+/// #[derive(Clone, Debug, PartialEq)]
+/// enum MyErrorKind {
+///     Failed,
+/// }
+///
+/// impl Display for MyErrorKind {
+///     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+///         write!(f, "failed")
+///     }
+/// }
+///
+/// impl async_nats::error::ErrorKind for MyErrorKind {}
+///
+/// let error: async_nats::error::Error<MyErrorKind> = MyErrorKind::Failed.into();
+/// ```
+pub trait ErrorKind: Clone + Debug + Display + PartialEq {}
+
+/// Implements [`ErrorKind`] for the given types. Only list concrete kind types
+/// defined in this crate. Do not implement the trait for foreign types or as a
+/// blanket implementation over the required bounds; either would reintroduce the
+/// coherence hazard this trait exists to remove.
+macro_rules! error_kinds {
+    ($($kind:ty),* $(,)?) => {
+        $(impl $crate::error::ErrorKind for $kind {})*
+    };
+}
+pub(crate) use error_kinds;
+
 impl<Kind> From<Kind> for Error<Kind>
 where
-    Kind: Clone + Debug + Display + PartialEq,
+    Kind: ErrorKind,
 {
     fn from(kind: Kind) -> Self {
         Self { kind, source: None }
@@ -102,6 +145,8 @@ mod test {
             }
         }
     }
+
+    error_kinds!(FooErrorKind);
 
     // Define a custom error type as a public struct
     type FooError = Error<FooErrorKind>;

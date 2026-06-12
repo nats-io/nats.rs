@@ -619,3 +619,5 @@ fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
         Duration::from_secs(10)
     }
 }
+
+crate::error::error_kinds!(StreamErrorKind);

@@ -1753,3 +1753,13 @@ pub type PurgeErrorKind = UpdateErrorKind;
 
 pub type HistoryError = WatchError;
 pub type HistoryErrorKind = WatchErrorKind;
+
+crate::error::error_kinds!(
+    StatusErrorKind,
+    CreateErrorKind,
+    PutErrorKind,
+    EntryErrorKind,
+    WatchErrorKind,
+    UpdateErrorKind,
+    WatcherErrorKind,
+);
