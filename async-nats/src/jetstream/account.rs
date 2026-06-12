@@ -85,9 +85,6 @@ pub struct Tier {
     pub consumers: usize,
     /// Limits imposed on this tier.
     pub limits: Limits,
-    /// Number of requests received.
-    #[serde(rename = "api")]
-    pub requests: Requests,
 }
 
 #[derive(Debug, Default, Deserialize, Clone, PartialEq, Eq)]
