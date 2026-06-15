@@ -13,9 +13,9 @@ url = "2"
 serde_json = "1.0.104"
 nuid = "0.5"
 rand = "0.10.1"
-tokio-retry = "0.3.0"
 
 [dev-dependencies]
 async-nats = { path = "../async-nats" }
 tokio = { version = "1", features = ["full"]  }
+tryhard = "0.5"
 futures-util = "0.3"
