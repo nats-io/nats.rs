@@ -255,13 +255,16 @@ impl ObjectStore {
                 }
                 _ => InfoError::with_source(InfoErrorKind::Other, err),
             })?;
-        let object_info =
+        let mut object_info =
             serde_json::from_slice::<ObjectInfo>(&message.payload).map_err(|err| {
                 InfoError::with_source(
                     InfoErrorKind::Other,
                     format!("failed to decode info payload: {err}"),
                 )
             })?;
+        // Per ADR-20, `modified` is the server message timestamp, not the `mtime`
+        // stored in the JSON payload (which some clients leave zeroed)
+        object_info.modified = Some(message.time);
 
         Ok(object_info)
     }
@@ -903,13 +906,19 @@ impl Stream for List {
                             if info.pending == 0 {
                                 self.done = true;
                             }
-                            let response: ObjectInfo = serde_json::from_slice(&message.payload)
+                            // Copy the server timestamp out before borrowing the
+                            // payload below, since `info` borrows `message`
+                            let modified = info.published;
+                            let mut response: ObjectInfo = serde_json::from_slice(&message.payload)
                                 .map_err(|err| {
                                     ListerError::with_source(
                                         ListerErrorKind::Other,
                                         format!("failed deserializing object info: {err}"),
                                     )
                                 })?;
+                            // Per ADR-20, `modified` is the server message timestamp,
+                            // not the `mtime` stored in the JSON payload
+                            response.modified = Some(modified);
                             if response.deleted {
                                 continue;
                             }
