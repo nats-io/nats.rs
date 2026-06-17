@@ -70,6 +70,10 @@ pub struct ConnectOptions {
     pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: http::HeaderMap,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers_callback: Option<Callback0<Result<http::HeaderMap, AuthError>>>,
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -126,6 +130,10 @@ impl Default for ConnectOptions {
             skip_subject_validation: false,
             local_address: None,
             reconnect_to_server_callback: None,
+            #[cfg(feature = "websockets")]
+            websocket_headers: http::HeaderMap::new(),
+            #[cfg(feature = "websockets")]
+            websocket_headers_callback: None,
         }
     }
 }
@@ -1039,6 +1047,112 @@ impl ConnectOptions {
         self.local_address = Some(address);
         self
     }
+
+    /// Sets custom HTTP headers to include in the WebSocket upgrade request.
+    ///
+    /// This is useful when connecting to a NATS server through a reverse proxy
+    /// (e.g., Kong, nginx, Envoy) that validates session cookies or
+    /// authorization tokens on the HTTP upgrade before proxying the
+    /// WebSocket connection.
+    ///
+    /// Headers in the [`DISALLOWED_HEADERS`][tokio_websockets::client::DISALLOWED_HEADERS]
+    /// list (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`,
+    /// `Sec-WebSocket-Version`) are managed by the WebSocket handshake and
+    /// will cause a connection error if set here.
+    ///
+    /// The configured headers are reused on every connection and reconnection
+    /// attempt. For headers that need to be refreshed on each connection
+    /// attempt (e.g., expiring JWTs), use
+    /// [`websocket_headers_callback`](Self::websocket_headers_callback) instead.
+    ///
+    /// **Note:** Each header name maps to a single value. If the provided
+    /// [`HeaderMap`](http::HeaderMap) contains multiple values for the same
+    /// name, only one will be sent.
+    ///
+    /// This option is mutually exclusive with
+    /// [`websocket_headers_callback`](Self::websocket_headers_callback).
+    /// Setting one clears the other.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// use http::header;
+    ///
+    /// let mut headers = http::HeaderMap::new();
+    /// headers.insert(
+    ///     header::COOKIE,
+    ///     "session=abc123".parse().unwrap(),
+    /// );
+    ///
+    /// let client = async_nats::ConnectOptions::new()
+    ///     .websocket_headers(headers)
+    ///     .connect("wss://proxy.example.com/nats")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "websockets")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "websockets")))]
+    pub fn websocket_headers(mut self, headers: http::HeaderMap) -> ConnectOptions {
+        self.websocket_headers = headers;
+        self.websocket_headers_callback = None;
+        self
+    }
+
+    /// Registers a callback invoked on every WebSocket handshake to supply
+    /// HTTP headers dynamically.
+    ///
+    /// Unlike [`websocket_headers`](Self::websocket_headers), which sets a
+    /// static header map once at builder time, this callback is called on
+    /// every connection and reconnection attempt. This makes it suitable for
+    /// headers that expire, such as bearer tokens or JWTs that need to be
+    /// refreshed.
+    ///
+    /// Headers in the [`DISALLOWED_HEADERS`][tokio_websockets::client::DISALLOWED_HEADERS]
+    /// list (`Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`,
+    /// `Sec-WebSocket-Version`) are managed by the WebSocket handshake and
+    /// will cause a connection error if returned by the callback.
+    ///
+    /// **Note:** Each header name maps to a single value. If the returned
+    /// [`HeaderMap`](http::HeaderMap) contains multiple values for the same
+    /// name, only one will be sent.
+    ///
+    /// This option is mutually exclusive with
+    /// [`websocket_headers`](Self::websocket_headers).
+    /// Setting one clears the other.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let client = async_nats::ConnectOptions::new()
+    ///     .websocket_headers_callback(|| async {
+    ///         let token = "Bearer refreshed_jwt_token";
+    ///         let mut headers = http::HeaderMap::new();
+    ///         headers.insert(
+    ///             http::header::AUTHORIZATION,
+    ///             token.parse().unwrap(),
+    ///         );
+    ///         Ok(headers)
+    ///     })
+    ///     .connect("wss://proxy.example.com/nats")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "websockets")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "websockets")))]
+    pub fn websocket_headers_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<http::HeaderMap, AuthError>> + Send + Sync + 'static,
+    {
+        self.websocket_headers = http::HeaderMap::new();
+        self.websocket_headers_callback =
+            Some(Callback0(Arc::new(move || Box::pin(cb()))));
+        self
+    }
 }
 
 pub(crate) type AsyncCallbackArg1<A, T> =
@@ -1054,6 +1168,28 @@ impl<A, T> CallbackArg1<A, T> {
 }
 
 impl<A, T> fmt::Debug for CallbackArg1<A, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str("callback")
+    }
+}
+
+#[cfg(feature = "websockets")]
+pub(crate) type AsyncCallback0<T> =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = T> + Send + Sync + 'static>> + Send + Sync>;
+
+#[cfg(feature = "websockets")]
+#[derive(Clone)]
+pub(crate) struct Callback0<T>(pub(crate) AsyncCallback0<T>);
+
+#[cfg(feature = "websockets")]
+impl<T> Callback0<T> {
+    pub(crate) async fn call(&self) -> T {
+        (self.0)().await
+    }
+}
+
+#[cfg(feature = "websockets")]
+impl<T> fmt::Debug for Callback0<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.write_str("callback")
     }
@@ -1083,3 +1219,130 @@ impl std::fmt::Debug for AuthError {
 }
 
 impl std::error::Error for AuthError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn websocket_headers_builder() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::COOKIE, "session=abc".parse().unwrap());
+        headers.insert(
+            http::header::AUTHORIZATION,
+            "Bearer token123".parse().unwrap(),
+        );
+
+        let opts = ConnectOptions::new()
+            .websocket_headers(headers)
+            .no_echo()
+            .name("test");
+
+        assert_eq!(opts.websocket_headers.len(), 2);
+        assert_eq!(
+            opts.websocket_headers
+                .get(http::header::COOKIE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "session=abc"
+        );
+        assert!(opts.websocket_headers_callback.is_none());
+    }
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn websocket_headers_default_empty() {
+        let opts = ConnectOptions::default();
+        assert!(opts.websocket_headers.is_empty());
+        assert!(opts.websocket_headers_callback.is_none());
+    }
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn websocket_headers_callback_builder() {
+        let opts = ConnectOptions::new()
+            .websocket_headers_callback(|| async {
+                let mut headers = http::HeaderMap::new();
+                headers.insert(
+                    http::header::AUTHORIZATION,
+                    "Bearer dynamic_token".parse().unwrap(),
+                );
+                Ok(headers)
+            })
+            .no_echo()
+            .name("test");
+
+        assert!(opts.websocket_headers.is_empty());
+        assert!(opts.websocket_headers_callback.is_some());
+    }
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn websocket_headers_callback_clears_static() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::COOKIE, "session=abc".parse().unwrap());
+
+        let opts = ConnectOptions::new()
+            .websocket_headers(headers)
+            .websocket_headers_callback(|| async {
+                Ok(http::HeaderMap::new())
+            });
+
+        assert!(opts.websocket_headers.is_empty());
+        assert!(opts.websocket_headers_callback.is_some());
+    }
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn websocket_headers_static_clears_callback() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::COOKIE, "session=abc".parse().unwrap());
+
+        let opts = ConnectOptions::new()
+            .websocket_headers_callback(|| async {
+                Ok(http::HeaderMap::new())
+            })
+            .websocket_headers(headers);
+
+        assert_eq!(opts.websocket_headers.len(), 1);
+        assert!(opts.websocket_headers_callback.is_none());
+    }
+
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn websocket_headers_callback_invoked() {
+        let opts = ConnectOptions::new().websocket_headers_callback(|| async {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                http::header::AUTHORIZATION,
+                "Bearer fresh_jwt".parse().unwrap(),
+            );
+            Ok(headers)
+        });
+
+        let cb = opts.websocket_headers_callback.as_ref().unwrap();
+        let headers = cb.call().await.unwrap();
+        assert_eq!(
+            headers
+                .get(http::header::AUTHORIZATION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer fresh_jwt"
+        );
+    }
+
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn websocket_headers_callback_error() {
+        let opts = ConnectOptions::new().websocket_headers_callback(|| async {
+            Err(AuthError::new("token refresh failed"))
+        });
+
+        let cb = opts.websocket_headers_callback.as_ref().unwrap();
+        let result = cb.call().await;
+        assert!(result.is_err());
+    }
+}
