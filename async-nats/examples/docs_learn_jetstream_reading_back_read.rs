@@ -35,7 +35,8 @@ async fn main() -> Result<(), async_nats::Error> {
             info.consumer_sequence,
             std::str::from_utf8(&msg.payload)?
         );
-        // Ack policy is None, so we don't acknowledge.
+        // Acknowledge so the server records this message as read.
+        msg.ack().await?;
     }
     // NATS-DOC-END
 

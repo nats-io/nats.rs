@@ -9,13 +9,13 @@ async fn main() -> Result<(), async_nats::Error> {
 
     // NATS-DOC-START
     // Create a durable pull consumer that starts at the first stored message
-    // and never acknowledges, so reads don't change what's on the consumer.
+    // and acknowledges each message explicitly, so the server tracks progress.
     let stream = js.get_stream("ORDERS").await?;
     let consumer = stream
         .create_consumer(pull::Config {
             durable_name: Some("orders-reader".to_string()),
             deliver_policy: DeliverPolicy::All,
-            ack_policy: AckPolicy::None,
+            ack_policy: AckPolicy::Explicit,
             ..Default::default()
         })
         .await?;
