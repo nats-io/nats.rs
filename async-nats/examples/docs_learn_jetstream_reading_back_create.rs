@@ -13,7 +13,7 @@ async fn main() -> Result<(), async_nats::Error> {
     let stream = js.get_stream("ORDERS").await?;
     let consumer = stream
         .create_consumer(pull::Config {
-            durable_name: Some("orders-reader".to_string()),
+            durable_name: Some("billing".to_string()),
             deliver_policy: DeliverPolicy::All,
             ack_policy: AckPolicy::Explicit,
             ..Default::default()

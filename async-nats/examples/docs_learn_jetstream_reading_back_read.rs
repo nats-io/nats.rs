@@ -11,7 +11,7 @@ async fn main() -> Result<(), async_nats::Error> {
     // NATS-DOC-START
     // Bind to the existing durable consumer.
     let stream = js.get_stream("ORDERS").await?;
-    let mut consumer: PullConsumer = stream.get_consumer("orders-reader").await?;
+    let mut consumer: PullConsumer = stream.get_consumer("billing").await?;
 
     // Ask the consumer how many messages are still waiting, then fetch exactly
     // that many. This reads everything in order without assuming a count.
