@@ -1421,16 +1421,18 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        tokio::spawn({
-            let sender = self.sender.clone();
-            let sid = self.sid;
-            async move {
-                sender
-                    .send(Command::Unsubscribe { sid, max: None })
-                    .await
-                    .ok();
-            }
-        });
+        // Best-effort unsubscribe. `tokio::spawn` would panic here since `Drop` can run outside
+        // any runtime (unwinding, teardown, a plain thread), so use synchronous `try_send`.
+        // If the channel is full or closed the unsubscribe is dropped; the server keeps interest
+        // only until the next unsubscribe or disconnect, so nothing lasting leaks.
+        // Debug, not warn: a closed channel is routine teardown and saturation already surfaces as
+        // `Event::SlowConsumer`.
+        if let Err(err) = self.sender.try_send(Command::Unsubscribe {
+            sid: self.sid,
+            max: None,
+        }) {
+            debug!("failed to send unsubscribe in Subscriber::drop: {err}");
+        }
     }
 }
 
