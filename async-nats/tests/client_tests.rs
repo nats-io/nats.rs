@@ -1874,4 +1874,19 @@ mod client {
             "disconnected too early ({elapsed:?}) to be the ping keepalive"
         );
     }
+
+    // `Subscriber::drop` must not assume a live runtime: dropping outside a runtime context
+    // (unwinding, teardown, a plain thread) must not panic.
+    #[test]
+    fn drop_subscriber_outside_runtime() {
+        let server = nats_server::run_basic_server();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let subscription = rt.block_on(async {
+            let client = async_nats::connect(server.client_url()).await.unwrap();
+            client.subscribe("foo").await.unwrap()
+        });
+        // `block_on` has returned, so this drop runs outside the runtime context — the condition
+        // under test.
+        drop(subscription);
+    }
 }
