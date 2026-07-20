@@ -1,10 +1,23 @@
-# Unreleased
-## Added
-* Add an optional `chrono` feature as an alternative datetime backend to `time`. JetStream and
-  Service datetime fields are exposed through the `async_nats::datetime::DateTime` alias, which
-  is `time::OffsetDateTime` by default and `chrono::DateTime<chrono::Utc>` when the `chrono`
-  feature is enabled. The default build is unchanged. Note: enabling `chrono` anywhere in the
-  dependency graph selects the chrono backend for the whole build (Cargo feature unification).
+# v0.50.0
+## Overview
+
+This release allows for on-demand swap between `chrono` and `time` crates.
+
+## What's Changed
+* Add chrono as alternative to time crate by @Jarema in https://github.com/nats-io/nats.rs/pull/1595
+* Use new start method for retry start in nats-server crate by @Jarema in https://github.com/nats-io/nats.rs/pull/1603
+* Fix account info deser failure on servers with tiered jetstream by @xanderio in https://github.com/nats-io/nats.rs/pull/1604
+
+## Chrono vs Time
+
+Enabling `chrono` anywhere in the
+dependency graph selects the chrono backend for the whole build (Cargo feature unification).
+
+
+## New Contributors
+* @xanderio made their first contribution in https://github.com/nats-io/nats.rs/pull/1604
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.49.1...async-nats/v0.50.0
 
 # v0.49.1
 ## Overview
