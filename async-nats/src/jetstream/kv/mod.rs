@@ -396,7 +396,7 @@ impl Store {
             return Err(EntryError::new(EntryErrorKind::InvalidKey));
         }
 
-        let subject = format!("{}{}", self.prefix.as_str(), &key);
+        let subject = format!("{}{}", self.prefix.as_str(), key);
 
         let result: Option<(StreamMessage, Operation)> = {
             if self.stream.info.config.allow_direct {

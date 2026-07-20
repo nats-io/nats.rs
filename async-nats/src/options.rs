@@ -1072,13 +1072,13 @@ impl AuthError {
 
 impl std::fmt::Display for AuthError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&format!("AuthError({})", &self.0))
+        f.write_str(&format!("AuthError({})", self.0))
     }
 }
 
 impl std::fmt::Debug for AuthError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&format!("AuthError({})", &self.0))
+        f.write_str(&format!("AuthError({})", self.0))
     }
 }
 

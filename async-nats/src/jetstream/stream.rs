@@ -652,7 +652,7 @@ impl<I> Stream<I> {
     /// # }
     /// ```
     pub async fn delete_message(&self, sequence: u64) -> Result<bool, DeleteMessageError> {
-        let subject = format!("STREAM.MSG.DELETE.{}", &self.name);
+        let subject = format!("STREAM.MSG.DELETE.{}", self.name);
         let payload = json!({
             "seq": sequence,
         });
@@ -2693,10 +2693,10 @@ impl<T> DirectGetBuilder<T> {
         let request_subject = if let Some(ref subject) = self.request.last_by_subject {
             format!(
                 "{}.DIRECT.GET.{}.{}",
-                &self.context.prefix, &self.stream_name, subject
+                self.context.prefix, self.stream_name, subject
             )
         } else {
-            format!("{}.DIRECT.GET.{}", &self.context.prefix, &self.stream_name)
+            format!("{}.DIRECT.GET.{}", self.context.prefix, self.stream_name)
         };
 
         let response = self
@@ -2837,7 +2837,7 @@ impl<T> RawMessageBuilder<T> {
             }
         }
 
-        let subject = format!("STREAM.MSG.GET.{}", &self.stream_name);
+        let subject = format!("STREAM.MSG.GET.{}", self.stream_name);
 
         let response: Response<GetRawMessage> = self
             .context

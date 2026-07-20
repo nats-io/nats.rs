@@ -1033,7 +1033,7 @@ impl Context {
             return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
         }
 
-        let stream_name = format!("KV_{}", &bucket);
+        let stream_name = format!("KV_{}", bucket);
         let stream = self
             .get_stream(stream_name.clone())
             .map_err(|err| KeyValueError::with_source(KeyValueErrorKind::GetBucket, err))
@@ -1043,7 +1043,7 @@ impl Context {
             return Err(KeyValueError::new(KeyValueErrorKind::InvalidStoreName));
         }
         let mut store = Store {
-            prefix: format!("$KV.{}.", &bucket),
+            prefix: format!("$KV.{}.", bucket),
             name: bucket,
             stream_name,
             stream: stream.clone(),

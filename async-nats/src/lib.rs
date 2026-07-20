@@ -858,7 +858,7 @@ impl ConnectionHandler {
                     // sid isn't set, so drain the whole client
                     self.connector.events_tx.try_send(Event::Draining).ok();
                     self.is_draining = true;
-                    for (&sid, _) in self.subscriptions.iter_mut() {
+                    for &sid in self.subscriptions.keys() {
                         drain_sub(sid);
                     }
                 }

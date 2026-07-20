@@ -204,7 +204,7 @@ impl ObjectStore {
             })?,
         );
 
-        let subject = format!("$O.{}.M.{}", &self.name, encode_object_name(object_name));
+        let subject = format!("$O.{}.M.{}", self.name, encode_object_name(object_name));
 
         self.stream
             .context
@@ -242,7 +242,7 @@ impl ObjectStore {
         }
 
         // Grab last meta value we have.
-        let subject = format!("$O.{}.M.{}", &self.name, &object_name);
+        let subject = format!("$O.{}.M.{}", self.name, object_name);
 
         // FIXME(jrm): we should use direct get here when possible.
         let message = self
@@ -297,7 +297,7 @@ impl ObjectStore {
         let maybe_existing_object_info = (self.info(&object_meta.name).await).ok();
 
         let object_nuid = crate::id_generator::next();
-        let chunk_subject = Subject::from(format!("$O.{}.C.{}", &self.name, &object_nuid));
+        let chunk_subject = Subject::from(format!("$O.{}.C.{}", self.name, object_nuid));
 
         let mut object_chunks = 0;
         let mut object_size = 0;
@@ -346,7 +346,7 @@ impl ObjectStore {
         if !is_valid_object_name(&encoded_object_name) {
             return Err(PutError::new(PutErrorKind::InvalidName));
         }
-        let subject = format!("$O.{}.M.{}", &self.name, &encoded_object_name);
+        let subject = format!("$O.{}.M.{}", self.name, encoded_object_name);
 
         let object_info = ObjectInfo {
             name: object_meta.name,
@@ -401,7 +401,7 @@ impl ObjectStore {
 
         // Purge any old chunks.
         if let Some(existing_object_info) = maybe_existing_object_info {
-            let chunk_subject = format!("$O.{}.C.{}", &self.name, &existing_object_info.nuid);
+            let chunk_subject = format!("$O.{}.C.{}", self.name, existing_object_info.nuid);
 
             self.stream
                 .purge()
@@ -612,7 +612,7 @@ impl ObjectStore {
         info.description = metadata.description;
 
         let name = encode_object_name(&info.name);
-        let subject = format!("$O.{}.M.{}", &self.name, &name);
+        let subject = format!("$O.{}.M.{}", self.name, name);
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -801,7 +801,7 @@ impl ObjectStore {
 
 async fn publish_meta(store: &ObjectStore, info: &ObjectInfo) -> Result<(), PublishMetadataError> {
     let encoded_object_name = encode_object_name(&info.name);
-    let subject = format!("$O.{}.M.{}", &store.name, &encoded_object_name);
+    let subject = format!("$O.{}.M.{}", store.name, encoded_object_name);
 
     let mut headers = HeaderMap::new();
     headers.insert(
