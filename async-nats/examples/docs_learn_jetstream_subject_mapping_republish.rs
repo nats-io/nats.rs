@@ -26,7 +26,10 @@ async fn main() -> Result<(), async_nats::Error> {
 
     println!(
         "Republishing to: {}",
-        info.config.republish.unwrap().destination
+        info.config
+            .republish
+            .as_ref()
+            .map_or("", |r| r.destination.as_str())
     );
     // NATS-DOC-END
 

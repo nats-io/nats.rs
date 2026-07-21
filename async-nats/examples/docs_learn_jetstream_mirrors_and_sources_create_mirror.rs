@@ -28,7 +28,7 @@ async fn main() -> Result<(), async_nats::Error> {
     println!(
         "Created mirror {} of {}",
         cfg.name,
-        cfg.mirror.as_ref().unwrap().name
+        cfg.mirror.as_ref().map_or("unknown", |m| m.name.as_str())
     );
     // NATS-DOC-END
 

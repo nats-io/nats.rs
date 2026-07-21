@@ -23,7 +23,7 @@ async fn main() -> Result<(), async_nats::Error> {
 
     let mut messages = consumer
         .fetch()
-        .max_messages(pending as usize)
+        .max_messages(usize::try_from(pending).unwrap_or(usize::MAX))
         .messages()
         .await?;
     while let Some(msg) = messages.next().await {

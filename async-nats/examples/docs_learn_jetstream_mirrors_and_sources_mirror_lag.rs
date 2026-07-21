@@ -11,7 +11,10 @@ async fn main() -> Result<(), async_nats::Error> {
     // hold what the upstream just received: 0 means fully caught up.
     let mut stream = js.get_stream("ORDERS-ARCHIVE").await?;
     let info = stream.info().await?;
-    let mirror = info.mirror.as_ref().unwrap();
+    let Some(mirror) = info.mirror.as_ref() else {
+        println!("stream is not a mirror");
+        return Ok(());
+    };
 
     println!("Upstream:  {}", mirror.name);
     println!("Lag:       {}", mirror.lag);

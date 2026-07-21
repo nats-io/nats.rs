@@ -6,7 +6,11 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect("nats://localhost:4222").await?;
     let js = jetstream::new(client);
 
-    js.delete_stream("ALL-ORDERS").await.ok();
+    // Start clean so re-runs are deterministic: the aggregate and the regional
+    // streams it sources are all recreated below.
+    for name in ["ALL-ORDERS", "ORDERS-US", "ORDERS-EU", "ORDERS-APAC"] {
+        js.delete_stream(name).await.ok();
+    }
 
     // Setup: the three regional streams ALL-ORDERS aggregates, each with its
     // own subjects.

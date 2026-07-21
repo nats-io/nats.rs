@@ -9,16 +9,25 @@ async fn main() -> Result<(), async_nats::Error> {
     let client = async_nats::connect(nats_url).await?;
     let js = jetstream::new(client);
 
-    // Create ORDERS with per-message TTLs enabled. The `allow_message_ttl` field
-    // maps to the stream's `allow_msg_ttl` setting; without it the server rejects
-    // any message that carries a `Nats-TTL` header.
-    js.create_stream(stream::Config {
-        name: "ORDERS".to_string(),
-        subjects: vec!["orders.>".to_string()],
-        allow_message_ttl: true,
-        ..Default::default()
-    })
-    .await?;
+    // Make sure ORDERS exists with per-message TTLs enabled. The
+    // `allow_message_ttl` field maps to the stream's `allow_msg_ttl` setting;
+    // without it the server rejects any message that carries a `Nats-TTL`
+    // header. If ORDERS is already there from an earlier example, update it in
+    // place instead of failing on create.
+    if js
+        .create_stream(stream::Config {
+            name: "ORDERS".to_string(),
+            subjects: vec!["orders.>".to_string()],
+            allow_message_ttl: true,
+            ..Default::default()
+        })
+        .await
+        .is_err()
+    {
+        let mut config = js.get_stream("ORDERS").await?.info().await?.config.clone();
+        config.allow_message_ttl = true;
+        js.update_stream(&config).await?;
+    }
 
     // NATS-DOC-START
     // Publish a cancellation that carries its own time-to-live. The `Nats-TTL`
