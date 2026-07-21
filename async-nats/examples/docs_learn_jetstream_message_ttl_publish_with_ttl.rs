@@ -30,7 +30,7 @@ async fn main() -> Result<(), async_nats::Error> {
     headers.insert("Nats-TTL", "60s");
 
     let ack = js
-        .publish_with_headers("orders.cancelled", headers, "order 4242 cancelled".into())
+        .publish_with_headers("orders.canceled", headers, "order 4242 canceled".into())
         .await?
         .await?;
 
