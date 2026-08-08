@@ -535,6 +535,131 @@ mod client {
     }
 
     #[tokio::test]
+    async fn dropped_subscriber_not_replayed_after_reconnect() {
+        let server = nats_server::run_basic_server();
+        let server_port = server.client_port();
+
+        let listen_fd = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = listen_fd.local_addr().unwrap().port();
+
+        let subject = "drop.reconnect";
+        let msg_prefix = format!("MSG {subject} ");
+        let seen = Arc::new(AtomicU64::new(0));
+        let seen_proxy = Arc::clone(&seen);
+
+        tokio::task::spawn(async move {
+            loop {
+                let Ok((downstream, _)) = listen_fd.accept().await else {
+                    break;
+                };
+
+                let upstream = tokio::net::TcpStream::connect(format!("127.0.0.1:{server_port}"))
+                    .await
+                    .unwrap();
+
+                let seen = Arc::clone(&seen_proxy);
+                let msg_prefix = msg_prefix.clone();
+
+                tokio::task::spawn(async move {
+                    let (dr, mut dw) = tokio::io::split(downstream);
+                    let (sr, mut sw) = tokio::io::split(upstream);
+
+                    let c2s = async move {
+                        let mut reader = tokio::io::BufReader::new(dr);
+                        let mut line = String::new();
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+                            sw.write_all(line.as_bytes()).await.ok();
+                        }
+                    };
+
+                    let s2c = async move {
+                        let mut reader = tokio::io::BufReader::new(sr);
+                        let mut line = String::new();
+
+                        loop {
+                            line.clear();
+                            let n = reader.read_line(&mut line).await.unwrap_or(0);
+                            if n == 0 {
+                                break;
+                            }
+
+                            if line.starts_with(&msg_prefix) {
+                                seen.fetch_add(1, Ordering::Relaxed);
+                            }
+
+                            dw.write_all(line.as_bytes()).await.ok();
+
+                            if line.starts_with("MSG ") {
+                                let num_bytes: usize =
+                                    line.trim().rsplit(' ').next().unwrap().parse().unwrap();
+                                let mut payload = vec![0u8; num_bytes + 2];
+                                reader.read_exact(&mut payload).await.unwrap();
+                                dw.write_all(&payload).await.ok();
+                            }
+                        }
+                    };
+
+                    tokio::select! {
+                        _ = c2s => {},
+                        _ = s2c => {},
+                    }
+                });
+            }
+        });
+
+        let (dctx, mut dcrx) = tokio::sync::mpsc::channel(1);
+        let (rctx, mut rcrx) = tokio::sync::mpsc::channel(1);
+        let client = async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let dctx = dctx.clone();
+                let rctx = rctx.clone();
+                async move {
+                    match event {
+                        Event::Disconnected => dctx.send(()).await.unwrap(),
+                        Event::Connected => rctx.send(()).await.unwrap(),
+                        _ => (),
+                    }
+                }
+            })
+            .connect(format!("127.0.0.1:{proxy_port}"))
+            .await
+            .unwrap();
+
+        let subscription = client.subscribe(subject).await.unwrap();
+        drop(subscription);
+
+        client.force_reconnect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // initial connect event
+            rcrx.recv().await.unwrap();
+            dcrx.recv().await.unwrap();
+            rcrx.recv().await.unwrap();
+        })
+        .await
+        .unwrap();
+
+        for _ in 0..5 {
+            client
+                .publish(subject, Bytes::from_static(b"data"))
+                .await
+                .unwrap();
+        }
+        client.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            seen.load(Ordering::Relaxed),
+            0,
+            "dropped subscriber should not be replayed after reconnect"
+        );
+    }
+
+    #[tokio::test]
     async fn connect_invalid() {
         assert!(async_nats::connect("localhost:1111").await.is_err());
     }

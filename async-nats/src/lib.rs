@@ -1275,13 +1275,20 @@ impl From<io::Error> for ConnectError {
 /// Retrieves messages from given `subscription` created by [Client::subscribe].
 ///
 /// Implements [futures_util::stream::Stream] for ergonomic async message processing.
+/// For deterministic cleanup, prefer calling [`Subscriber::unsubscribe`] or
+/// [`Subscriber::drain`]. Dropping a [`Subscriber`] is best-effort.
 ///
 /// # Examples
-/// ```
+/// ```no_run
+/// # use futures_util::StreamExt;
 /// # #[tokio::main]
 /// # async fn main() ->  Result<(), async_nats::Error> {
-/// let mut nc = async_nats::connect("demo.nats.io").await?;
-/// # nc.publish("test", "data".into()).await?;
+/// let client = async_nats::connect("demo.nats.io").await?;
+/// let mut subscriber = client.subscribe("events.>").await?;
+///
+/// while let Some(message) = subscriber.next().await {
+///     println!("received: {message:?}");
+/// }
 /// # Ok(())
 /// # }
 /// ```
@@ -1308,7 +1315,7 @@ impl Subscriber {
     /// Unsubscribes from subscription, draining all remaining messages.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
     /// let client = async_nats::connect("demo.nats.io").await?;
@@ -1319,6 +1326,9 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// This method is the reliable unsubscribe path: it waits for the command to be accepted by
+    /// the client's command channel. Dropping [`Subscriber`] is best-effort.
     pub async fn unsubscribe(&mut self) -> Result<(), UnsubscribeError> {
         self.sender
             .send(Command::Unsubscribe {
@@ -1331,11 +1341,11 @@ impl Subscriber {
     }
 
     /// Unsubscribes from subscription after reaching given number of messages.
-    /// This is the total number of messages received by this subscription in it's whole
+    /// This is the total number of messages received by this subscription in its whole
     /// lifespan. If it already reached or surpassed the passed value, it will immediately stop.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # use futures_util::StreamExt;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), async_nats::Error> {
@@ -1418,19 +1428,26 @@ impl From<tokio::sync::mpsc::error::SendError<Command>> for UnsubscribeError {
     }
 }
 
+#[inline]
+fn drop_unsubscribe_command(sid: u64) -> Command {
+    Command::Unsubscribe { sid, max: None }
+}
+
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        // Best-effort unsubscribe. `tokio::spawn` would panic here since `Drop` can run outside
-        // any runtime (unwinding, teardown, a plain thread), so use synchronous `try_send`.
-        // If the channel is full or closed the unsubscribe is dropped; the server keeps interest
-        // only until the next unsubscribe or disconnect, so nothing lasting leaks.
-        // Debug, not warn: a closed channel is routine teardown and saturation already surfaces as
-        // `Event::SlowConsumer`.
-        if let Err(err) = self.sender.try_send(Command::Unsubscribe {
-            sid: self.sid,
-            max: None,
-        }) {
+        // Best-effort unsubscribe. `Drop` can run outside a Tokio runtime (unwinding, teardown,
+        // plain threads), so only spawn when a runtime is available and otherwise use
+        // synchronous `try_send` to avoid panics.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let sender = self.sender.clone();
+            let sid = self.sid;
+            let _ = handle.spawn(async move {
+                if let Err(err) = sender.send(drop_unsubscribe_command(sid)).await {
+                    debug!("failed to send unsubscribe in Subscriber::drop: {err}");
+                }
+            });
+        } else if let Err(err) = self.sender.try_send(drop_unsubscribe_command(self.sid)) {
             debug!("failed to send unsubscribe in Subscriber::drop: {err}");
         }
     }
@@ -1841,6 +1858,9 @@ use crate::message::OutboundMessage;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
+    use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::time::{timeout, Duration};
 
     #[test]
     fn server_address_ipv6() {
@@ -1930,5 +1950,81 @@ mod tests {
             let mut addrs_iter = arr.to_server_addrs().unwrap();
             assert_eq!(addrs_iter.next().unwrap().port(), expected_port);
         }
+    }
+
+    #[tokio::test]
+    async fn drop_subscriber_in_runtime_full_command_channel_eventually_unsubscribes() {
+        let sid = 42;
+        let (sender, mut receiver) = mpsc::channel(1);
+        sender.try_send(Command::Reconnect).unwrap();
+
+        let (_message_sender, message_receiver) = mpsc::channel(1);
+        let subscriber = Subscriber::new(sid, sender, message_receiver);
+        drop(subscriber);
+
+        assert!(matches!(receiver.recv().await, Some(Command::Reconnect)));
+        assert!(matches!(
+            timeout(Duration::from_secs(1), receiver.recv()).await.unwrap(),
+            Some(Command::Unsubscribe {
+                sid: recv_sid,
+                max: None
+            }) if recv_sid == sid
+        ));
+    }
+
+    #[test]
+    fn drop_subscriber_outside_runtime_open_command_channel_sends_unsubscribe() {
+        let sid = 17;
+        let (sender, mut receiver) = mpsc::channel(1);
+
+        let (_message_sender, message_receiver) = mpsc::channel(1);
+        let subscriber = Subscriber::new(sid, sender, message_receiver);
+        drop(subscriber);
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Command::Unsubscribe {
+                sid: recv_sid,
+                max: None
+            }) if recv_sid == sid
+        ));
+    }
+
+    #[test]
+    fn drop_subscriber_outside_runtime_full_command_channel_is_best_effort() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        sender.try_send(Command::Reconnect).unwrap();
+
+        let (_message_sender, message_receiver) = mpsc::channel(1);
+        let subscriber = Subscriber::new(7, sender, message_receiver);
+        drop(subscriber);
+
+        assert!(matches!(receiver.try_recv(), Ok(Command::Reconnect)));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(TryRecvError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn drop_subscriber_outside_runtime_closed_command_channel_does_not_panic() {
+        let (sender, receiver) = mpsc::channel(1);
+        drop(receiver);
+
+        let (_message_sender, message_receiver) = mpsc::channel(1);
+        let subscriber = Subscriber::new(9, sender, message_receiver);
+        drop(subscriber);
+    }
+
+    #[tokio::test]
+    async fn drop_subscriber_in_runtime_closed_command_channel_does_not_panic() {
+        let (sender, receiver) = mpsc::channel(1);
+        drop(receiver);
+
+        let (_message_sender, message_receiver) = mpsc::channel(1);
+        let subscriber = Subscriber::new(11, sender, message_receiver);
+        drop(subscriber);
+
+        tokio::task::yield_now().await;
     }
 }
