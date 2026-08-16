@@ -212,9 +212,20 @@ impl Connection {
                 .parse::<usize>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
+            // A length near `usize::MAX` wraps this sum past the check in release.
+            let Some(required) = len
+                .checked_add(payload_len)
+                .and_then(|len| len.checked_add(4))
+            else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of payload bytes after MSG overflows",
+                ));
+            };
+
             // Return early without advancing if there is not enough data read the entire
             // message
-            if len + payload_len + 4 > self.read_buf.remaining() {
+            if required > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -322,7 +333,17 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.read_buf.remaining() {
+            let Some(required) = len
+                .checked_add(total_len)
+                .and_then(|len| len.checked_add(4))
+            else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of bytes after HMSG overflows",
+                ));
+            };
+
+            if required > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -1230,6 +1251,30 @@ mod read_op {
         };
         let headers = headers.expect("headers");
         assert_eq!(headers.get("K").unwrap().as_str(), "one two");
+    }
+
+    #[tokio::test]
+    async fn msg_with_overflowing_payload_len_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        let line = format!("MSG a 1 {}\r\nxx\r\n", usize::MAX);
+        server.write_all(line.as_bytes()).await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_overflowing_total_len_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        let line = format!("HMSG a 1 12 {}\r\nNATS/1.0\r\n\r\n\r\n", usize::MAX);
+        server.write_all(line.as_bytes()).await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 }
 
