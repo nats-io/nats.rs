@@ -157,7 +157,8 @@ impl Connection {
         }
 
         if self.read_buf.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.read_buf[5..len])
+            // A bare `-ERR\r\n` has no description, so `len` can be below 5.
+            let description = str::from_utf8(self.read_buf.get(5..len).unwrap_or_default())
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
@@ -1275,6 +1276,20 @@ mod read_op {
 
         let err = connection.read_op().await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn err_without_description() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"-ERR\r\n").await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Error(ServerError::Other(String::new())))
+        );
     }
 }
 
