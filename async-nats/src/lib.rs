@@ -1516,7 +1516,7 @@ impl std::fmt::Display for ServerError {
 }
 
 /// Info to construct a CONNECT message.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ConnectInfo {
     /// Turns on +OK protocol acknowledgments.
     pub verbose: bool,
@@ -1574,6 +1574,52 @@ pub struct ConnectInfo {
 
     /// Whether the client supports no_responders.
     pub no_responders: bool,
+}
+
+/// `Debug` implementation that redacts secrets (password, token, JWT and
+/// nonce signature) to prevent credential leaks in logs.
+impl fmt::Debug for ConnectInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn redact(secret: &Option<String>) -> Option<&'static str> {
+            secret.as_ref().map(|_| "XXXXXXXX")
+        }
+        let ConnectInfo {
+            verbose,
+            pedantic,
+            user_jwt,
+            nkey,
+            signature,
+            name,
+            echo,
+            lang,
+            version,
+            protocol,
+            tls_required,
+            user,
+            pass,
+            auth_token,
+            headers,
+            no_responders,
+        } = self;
+        f.debug_struct("ConnectInfo")
+            .field("verbose", verbose)
+            .field("pedantic", pedantic)
+            .field("user_jwt", &redact(user_jwt))
+            .field("nkey", nkey)
+            .field("signature", &redact(signature))
+            .field("name", name)
+            .field("echo", echo)
+            .field("lang", lang)
+            .field("version", version)
+            .field("protocol", protocol)
+            .field("tls_required", tls_required)
+            .field("user", user)
+            .field("pass", &redact(pass))
+            .field("auth_token", &redact(auth_token))
+            .field("headers", headers)
+            .field("no_responders", no_responders)
+            .finish()
+    }
 }
 
 /// Protocol version used by the client.
@@ -1839,6 +1885,35 @@ use crate::message::OutboundMessage;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connect_info_debug_redacts_secrets() {
+        let connect_info = ConnectInfo {
+            verbose: false,
+            pedantic: false,
+            user_jwt: Some("secret-jwt".into()),
+            nkey: Some("public-nkey".into()),
+            signature: Some("secret-signature".into()),
+            name: None,
+            echo: true,
+            lang: "rust".into(),
+            version: "1.0.0".into(),
+            protocol: Protocol::Dynamic,
+            tls_required: false,
+            user: Some("derek".into()),
+            pass: Some("s3cr3t!".into()),
+            auth_token: Some("secret-token".into()),
+            headers: true,
+            no_responders: true,
+        };
+        let output = format!("{connect_info:?}");
+        assert!(!output.contains("secret-jwt"));
+        assert!(!output.contains("secret-signature"));
+        assert!(!output.contains("s3cr3t!"));
+        assert!(!output.contains("secret-token"));
+        assert!(output.contains("public-nkey"));
+        assert!(output.contains("derek"));
+    }
 
     #[test]
     fn server_address_ipv6() {
