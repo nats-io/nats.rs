@@ -995,8 +995,7 @@ impl tokio::io::AsyncRead for Object {
                                     filter_subject: format!("$O.{bucket}.C.{nuid}"),
                                     ..Default::default()
                                 })
-                                .await
-                                .unwrap()
+                                .await?
                                 .messages()
                                 .await
                         }))
@@ -1004,7 +1003,12 @@ impl tokio::io::AsyncRead for Object {
                 };
                 match future.as_mut().poll(cx) {
                     Poll::Ready(subscription) => {
-                        self.subscription = Some(subscription.unwrap());
+                        self.subscription_future = None;
+                        self.subscription = Some(subscription.map_err(|err| {
+                            std::io::Error::other(format!(
+                                "failed creating JetStream subscription: {err}"
+                            ))
+                        })?);
                     }
                     Poll::Pending => (),
                 }
@@ -1290,6 +1294,12 @@ impl Display for GetErrorKind {
 pub type GetError = Error<GetErrorKind>;
 
 crate::from_with_timeout!(GetError, GetErrorKind, ConsumerError, ConsumerErrorKind);
+crate::from_with_timeout!(
+    StreamError,
+    StreamErrorKind,
+    ConsumerError,
+    ConsumerErrorKind
+);
 crate::from_with_timeout!(GetError, GetErrorKind, StreamError, StreamErrorKind);
 
 impl From<InfoError> for GetError {

@@ -717,6 +717,39 @@ mod object_store {
     }
 
     #[tokio::test]
+    async fn get_returns_error_instead_of_panic_when_consumer_creation_fails() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::ConnectOptions::new()
+            .request_timeout(Some(Duration::from_millis(500)))
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        bucket.put("FOO", &mut "hello".as_bytes()).await.unwrap();
+
+        let mut object = bucket.get("FOO").await.unwrap();
+
+        // Kill the server so the consumer creation that `poll_read` triggers
+        // lazily on first read times out instead of succeeding. This used to
+        // panic on an `.unwrap()` instead of surfacing an `io::Error`.
+        drop(server);
+
+        let mut buf = Vec::new();
+        let result = object.read_to_end(&mut buf).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn object_info_header_backward_compatibility() {
         // Test that ObjectInfo can deserialize both old and new HeaderMap formats
         let mut headers = HeaderMap::new();
