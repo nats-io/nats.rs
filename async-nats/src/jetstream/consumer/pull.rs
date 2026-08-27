@@ -1708,6 +1708,8 @@ pub struct FetchBuilder<'a> {
     min_pending: Option<usize>,
     min_ack_pending: Option<usize>,
     group: Option<String>,
+    #[cfg(feature = "server_2_12")]
+    priority: Option<usize>,
     consumer: &'a Consumer<Config>,
 }
 
@@ -1721,6 +1723,8 @@ impl<'a> FetchBuilder<'a> {
             min_pending: None,
             min_ack_pending: None,
             group: None,
+            #[cfg(feature = "server_2_12")]
+            priority: None,
             heartbeat: Duration::default(),
         }
     }
@@ -1924,7 +1928,7 @@ impl<'a> FetchBuilder<'a> {
     /// lower priority number, this stream will not get messages until those are satisfied.
     #[cfg(feature = "server_2_12")]
     pub fn priority(mut self, priority: usize) -> Self {
-        self.batch = priority;
+        self.priority = Some(priority);
         self
     }
 
@@ -2051,7 +2055,7 @@ impl<'a> FetchBuilder<'a> {
                 min_ack_pending: self.min_ack_pending,
                 group: self.group,
                 #[cfg(feature = "server_2_12")]
-                priority: None,
+                priority: self.priority,
             },
             self.consumer,
         )
