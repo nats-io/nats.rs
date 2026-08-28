@@ -18,6 +18,8 @@ use crate::connection::State;
 #[cfg(feature = "websockets")]
 use crate::connection::WebSocketAdapter;
 use crate::options::CallbackArg1;
+#[cfg(feature = "websockets")]
+use crate::options::Callback0;
 use crate::tls;
 use crate::AuthError;
 use crate::ClientError;
@@ -154,6 +156,10 @@ pub(crate) struct ConnectorOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: http::HeaderMap,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers_callback: Option<Callback0<Result<http::HeaderMap, AuthError>>>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -201,6 +207,22 @@ impl Connector {
             connect_stats,
             last_info: ServerInfo::default(),
         })
+    }
+
+    /// Resolves WebSocket headers for the current handshake.
+    ///
+    /// If a callback is registered, it is invoked (allowing dynamic token
+    /// refresh on reconnect). Otherwise the static header map is cloned.
+    #[cfg(feature = "websockets")]
+    async fn resolve_websocket_headers(&self) -> Result<http::HeaderMap, ConnectError> {
+        if let Some(cb) = self.options.websocket_headers_callback.as_ref() {
+            cb.call().await.map_err(|err| {
+                tracing::error!(error = %err, "websocket headers callback failed");
+                ConnectError::with_source(crate::ConnectErrorKind::Authentication, err)
+            })
+        } else {
+            Ok(self.options.websocket_headers.clone())
+        }
     }
 
     /// Replaces the server pool. Preserves per-server state for servers that
@@ -483,11 +505,20 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
+                let headers = self.resolve_websocket_headers().await?;
+                let mut builder = tokio_websockets::client::Builder::new()
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                for (name, value) in headers.iter() {
+                    builder = builder
+                        .add_header(name.clone(), value.clone())
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                        })?;
+                }
+                let ws = builder
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
@@ -497,17 +528,27 @@ impl Connector {
             }
             #[cfg(feature = "websockets")]
             "wss" => {
+                let headers = self.resolve_websocket_headers().await?;
                 let tls_config =
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
                 let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                let ws_connector = tokio_websockets::Connector::Rustls(tls_connector);
+                let mut builder = tokio_websockets::client::Builder::new()
+                    .connector(&ws_connector)
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                for (name, value) in headers.iter() {
+                    builder = builder
+                        .add_header(name.clone(), value.clone())
+                        .map_err(|err| {
+                            ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                        })?;
+                }
+                let ws = builder
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
