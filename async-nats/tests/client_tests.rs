@@ -15,6 +15,7 @@ mod client {
     use async_nats::client::Request;
     use async_nats::connection::State;
     use async_nats::header::HeaderValue;
+    use async_nats::rustls;
     use async_nats::{
         ConnectErrorKind, ConnectOptions, Event, RequestErrorKind, ServerAddr, Subject,
     };
@@ -546,6 +547,7 @@ mod client {
 
     #[tokio::test]
     async fn connect_invalid_tls_over_ip() {
+        rustls::crypto::ring::default_provider().install_default().unwrap();
         let server = nats_server::run_basic_server();
         assert!(async_nats::ConnectOptions::new()
             .require_tls(true)

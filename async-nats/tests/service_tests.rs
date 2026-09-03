@@ -15,8 +15,9 @@
 mod service {
     use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};
+    use async_nats::rustls;
     use futures_util::StreamExt;
-    use jsonschema::JSONSchema;
+    use jsonschema::Validator as JSONSchema;
     use std::error::Error;
     use std::fmt::Display;
     use std::{collections::HashMap, str::from_utf8};
@@ -515,6 +516,8 @@ mod service {
 
     #[tokio::test]
     async fn schemas() {
+        rustls::crypto::ring::default_provider().install_default().unwrap();
+
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
 
@@ -558,12 +561,10 @@ mod service {
                 .await
                 .unwrap();
 
-            match JSONSchema::compile(&schema).unwrap().validate(&data) {
+            match JSONSchema::new(&schema).unwrap().validate(&data) {
                 Ok(_) => (),
-                Err(mut errs) => {
-                    if let Some(err) = errs.next() {
-                        panic!("schema {endpoint} validation error: {err}")
-                    }
+                Err(err) => {
+                    panic!("schema {endpoint} validation error: {err}")
                 }
             };
         }
