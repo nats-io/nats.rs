@@ -1437,18 +1437,27 @@ impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
         // Best-effort unsubscribe. `Drop` can run outside a Tokio runtime (unwinding, teardown,
-        // plain threads), so only spawn when a runtime is available and otherwise use
-        // synchronous `try_send` to avoid panics.
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let sender = self.sender.clone();
-            let sid = self.sid;
-            let _ = handle.spawn(async move {
-                if let Err(err) = sender.send(drop_unsubscribe_command(sid)).await {
-                    debug!("failed to send unsubscribe in Subscriber::drop: {err}");
+        // plain threads), so start with synchronous `try_send` and only spawn an async retry when
+        // the command channel is full and a runtime is available.
+        match self.sender.try_send(drop_unsubscribe_command(self.sid)) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let sender = self.sender.clone();
+                    std::mem::drop(handle.spawn(async move {
+                        if let Err(err) = sender.send(command).await {
+                            debug!("failed to send unsubscribe in Subscriber::drop: {err}");
+                        }
+                    }));
+                } else {
+                    debug!(
+                        "failed to send unsubscribe in Subscriber::drop: command channel full and no runtime"
+                    );
                 }
-            });
-        } else if let Err(err) = self.sender.try_send(drop_unsubscribe_command(self.sid)) {
-            debug!("failed to send unsubscribe in Subscriber::drop: {err}");
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                debug!("failed to send unsubscribe in Subscriber::drop: command channel closed");
+            }
         }
     }
 }
