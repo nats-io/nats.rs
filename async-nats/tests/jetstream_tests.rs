@@ -4860,6 +4860,73 @@ mod jetstream {
             .unwrap();
     }
 
+    #[cfg(feature = "server_2_12")]
+    #[tokio::test]
+    async fn prioritized_fetch() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let stream = context
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "source".into(),
+                subjects: vec!["test".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let consumer = stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("consumer".into()),
+                priority_policy: PriorityPolicy::Prioritized,
+                priority_groups: vec!["A".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for i in 0..10 {
+            context
+                .publish("test", format!("{i}").into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let mut requests = client
+            .subscribe("$JS.API.CONSUMER.MSG.NEXT.source.consumer")
+            .await
+            .unwrap();
+
+        let mut messages = consumer
+            .fetch()
+            .max_messages(10)
+            .expires(tokio::time::Duration::from_secs(5))
+            .group("A")
+            .priority(5)
+            .messages()
+            .await
+            .unwrap();
+
+        // The pull request must carry the priority and leave the batch size untouched.
+        let request = tokio::time::timeout(Duration::from_secs(5), requests.next())
+            .await
+            .unwrap()
+            .unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
+        assert_eq!(request["batch"], 10);
+        assert_eq!(request["priority"], 5);
+
+        let mut count = 0;
+        while let Some(message) = messages.next().await {
+            message.unwrap().ack().await.unwrap();
+            count += 1;
+        }
+        assert_eq!(count, 10);
+    }
+
     #[tokio::test]
     async fn test_async_publish_max_ack_pending() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
