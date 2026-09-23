@@ -1444,11 +1444,11 @@ impl Drop for Subscriber {
             Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     let sender = self.sender.clone();
-                    std::mem::drop(handle.spawn(async move {
+                    handle.spawn(async move {
                         if let Err(err) = sender.send(command).await {
                             debug!("failed to send unsubscribe in Subscriber::drop: {err}");
                         }
-                    }));
+                    });
                 } else {
                     debug!(
                         "failed to send unsubscribe in Subscriber::drop: command channel full and no runtime"
