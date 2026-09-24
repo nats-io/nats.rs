@@ -525,8 +525,8 @@ pub(crate) fn parse_info(mut reply: &str) -> Result<Info<'_>, Error> {
                 datetime::from_nanos(nanos)?
             },
             pending: try_parse!(),
-            // The trailing token is optional: the server sends 11 tokens in total
-            // (9 after the prefix). Anything past the 10th is ignored.
+            // The trailing token is optional: ADR-15 requires 11 tokens in total (9 after
+            // the prefix) and allows more. Anything past the 10th is ignored.
             token: if n_tokens >= 10 {
                 Some(try_parse!(str))
             } else {
@@ -807,14 +807,13 @@ impl From<AckKind> for Bytes {
 pub struct Info<'a> {
     /// JetStream domain the message was delivered from.
     ///
-    /// Only present in the `v2` ack subject (ADR-15), which nats-server sends when the
-    /// `js_ack_fc_v2` feature flag is on. That is the default from server 2.16. `None` when the
-    /// server has no domain configured or sends the `v1` subject.
+    /// Present only when the server uses the `v2` ack subject format (ADR-15). `None` for the
+    /// `v1` format, or when the server has no domain configured.
     pub domain: Option<&'a str>,
     /// Hash of the account the message belongs to.
     ///
-    /// Only present in the `v2` ack subject. Used by the server for routing; the client does not
-    /// interpret it.
+    /// Present only in the `v2` ack subject format. Used by the server for routing; the client
+    /// does not interpret it.
     pub acc_hash: Option<&'a str>,
     /// The stream name
     pub stream: &'a str,
@@ -830,10 +829,10 @@ pub struct Info<'a> {
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
     pub published: DateTime,
-    /// Optional trailing token after the pending count in the `v2` ack subject.
+    /// Trailing token after the pending count in the `v2` ack subject format, if the server
+    /// sends one.
     ///
-    /// ADR-15 reserves room for it, but no nats-server release sends one, so this is currently
-    /// always `None`. Any further tokens after it are ignored.
+    /// ADR-15 allows it; the client does not interpret it. Any further tokens are ignored.
     pub token: Option<&'a str>,
 }
 
@@ -858,7 +857,7 @@ mod tests {
         assert_eq!(info.token, None);
     }
 
-    // Exactly what nats-server sends with `js_ack_fc_v2` enabled (default from 2.16):
+    // A `v2` subject as captured from nats-server with `js_ack_fc_v2` enabled:
     // 11 tokens, no trailing token.
     #[test]
     fn parses_v2_eleven_token_reply_without_domain() {
