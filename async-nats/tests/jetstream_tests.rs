@@ -3350,6 +3350,8 @@ mod jetstream {
             .create_stream(async_nats::jetstream::stream::Config {
                 name: "TEST".into(),
                 subjects: vec!["test".into()],
+                // Server 2.15+ defaults to 1000 consumers per stream; `-1` does not opt out.
+                max_consumers: 1200,
                 ..Default::default()
             })
             .await
