@@ -430,119 +430,129 @@ impl Message {
 
     /// Returns the `JetStream` message ID
     /// if this is a `JetStream` message.
-    #[allow(clippy::mixed_read_write_in_expression)]
     pub fn info(&self) -> Result<Info<'_>, Error> {
-        const PREFIX: &str = "$JS.ACK.";
-        const SKIP: usize = PREFIX.len();
-
-        let mut reply: &str = self.reply.as_ref().ok_or_else(|| {
+        let reply: &str = self.reply.as_ref().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "did not found reply subject")
         })?;
+        parse_info(reply)
+    }
+}
 
-        if !reply.starts_with(PREFIX) {
-            return Err(Box::new(std::io::Error::other(
-                "did not found proper prefix",
-            )));
+/// Parses the `$JS.ACK.` reply subject of a JetStream message into [Info].
+///
+/// Accepts both formats defined in ADR-15: the original 9-token subject, and the subject with
+/// 11 or more tokens that also carries the domain and account hash. Tokens beyond the ones
+/// known to this client are ignored.
+#[allow(clippy::mixed_read_write_in_expression)]
+pub(crate) fn parse_info(mut reply: &str) -> Result<Info<'_>, Error> {
+    const PREFIX: &str = "$JS.ACK.";
+    const SKIP: usize = PREFIX.len();
+
+    if !reply.starts_with(PREFIX) {
+        return Err(Box::new(std::io::Error::other(
+            "did not found proper prefix",
+        )));
+    }
+
+    reply = &reply[SKIP..];
+
+    let mut split = reply.split('.');
+
+    // we should avoid allocating to prevent
+    // large performance degradations in
+    // parsing this.
+    let mut tokens: [Option<&str>; 10] = [None; 10];
+    let mut n_tokens = 0;
+    for each_token in &mut tokens {
+        if let Some(token) = split.next() {
+            *each_token = Some(token);
+            n_tokens += 1;
         }
+    }
 
-        reply = &reply[SKIP..];
+    let mut token_index = 0;
 
-        let mut split = reply.split('.');
-
-        // we should avoid allocating to prevent
-        // large performance degradations in
-        // parsing this.
-        let mut tokens: [Option<&str>; 10] = [None; 10];
-        let mut n_tokens = 0;
-        for each_token in &mut tokens {
-            if let Some(token) = split.next() {
-                *each_token = Some(token);
-                n_tokens += 1;
+    macro_rules! try_parse {
+        () => {
+            match str::parse(try_parse!(str)) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
             }
-        }
-
-        let mut token_index = 0;
-
-        macro_rules! try_parse {
-            () => {
-                match str::parse(try_parse!(str)) {
-                    Ok(parsed) => parsed,
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
+        };
+        (str) => {
+            if let Some(next) = tokens[token_index].take() {
+                #[allow(unused)]
+                {
+                    // this isn't actually unused, but it's
+                    // difficult for the compiler to infer this.
+                    token_index += 1;
                 }
-            };
-            (str) => {
-                if let Some(next) = tokens[token_index].take() {
-                    #[allow(unused)]
-                    {
-                        // this isn't actually unused, but it's
-                        // difficult for the compiler to infer this.
-                        token_index += 1;
-                    }
-                    next
-                } else {
-                    return Err(Box::new(std::io::Error::other("too few tokens")));
-                }
-            };
-        }
+                next
+            } else {
+                return Err(Box::new(std::io::Error::other("too few tokens")));
+            }
+        };
+    }
 
-        // now we can try to parse the tokens to
-        // individual types. We use an if-else
-        // chain instead of a match because it
-        // produces more optimal code usually,
-        // and we want to try the 9 (11 - the first 2)
-        // case first because we expect it to
-        // be the most common. We use >= to be
-        // future-proof.
-        if n_tokens >= 9 {
-            Ok(Info {
-                domain: {
-                    let domain: &str = try_parse!(str);
-                    if domain == "_" {
-                        None
-                    } else {
-                        Some(domain)
-                    }
-                },
-                acc_hash: Some(try_parse!(str)),
-                stream: try_parse!(str),
-                consumer: try_parse!(str),
-                delivered: try_parse!(),
-                stream_sequence: try_parse!(),
-                consumer_sequence: try_parse!(),
-                published: {
-                    let nanos: i128 = try_parse!();
-                    datetime::from_nanos(nanos)?
-                },
-                pending: try_parse!(),
-                token: if n_tokens >= 9 {
-                    Some(try_parse!(str))
-                } else {
+    // now we can try to parse the tokens to
+    // individual types. We use an if-else
+    // chain instead of a match because it
+    // produces more optimal code usually,
+    // and we want to try the 9 (11 - the first 2)
+    // case first because we expect it to
+    // be the most common. We use >= to be
+    // future-proof.
+    if n_tokens >= 9 {
+        Ok(Info {
+            domain: {
+                let domain: &str = try_parse!(str);
+                if domain == "_" {
                     None
-                },
-            })
-        } else if n_tokens == 7 {
-            // we expect this to be increasingly rare, as older
-            // servers are phased out.
-            Ok(Info {
-                domain: None,
-                acc_hash: None,
-                stream: try_parse!(str),
-                consumer: try_parse!(str),
-                delivered: try_parse!(),
-                stream_sequence: try_parse!(),
-                consumer_sequence: try_parse!(),
-                published: {
-                    let nanos: i128 = try_parse!();
-                    datetime::from_nanos(nanos)?
-                },
-                pending: try_parse!(),
-                token: None,
-            })
-        } else {
-            Err(Box::new(std::io::Error::other("bad token number")))
-        }
+                } else {
+                    Some(domain)
+                }
+            },
+            acc_hash: Some(try_parse!(str)),
+            stream: try_parse!(str),
+            consumer: try_parse!(str),
+            delivered: try_parse!(),
+            stream_sequence: try_parse!(),
+            consumer_sequence: try_parse!(),
+            published: {
+                let nanos: i128 = try_parse!();
+                datetime::from_nanos(nanos)?
+            },
+            pending: try_parse!(),
+            // The trailing token is optional: the server sends 11 tokens in total
+            // (9 after the prefix). Anything past the 10th is ignored.
+            token: if n_tokens >= 10 {
+                Some(try_parse!(str))
+            } else {
+                None
+            },
+        })
+    } else if n_tokens == 7 {
+        // we expect this to be increasingly rare, as older
+        // servers are phased out.
+        Ok(Info {
+            domain: None,
+            acc_hash: None,
+            stream: try_parse!(str),
+            consumer: try_parse!(str),
+            delivered: try_parse!(),
+            stream_sequence: try_parse!(),
+            consumer_sequence: try_parse!(),
+            published: {
+                let nanos: i128 = try_parse!();
+                datetime::from_nanos(nanos)?
+            },
+            pending: try_parse!(),
+            token: None,
+        })
+    } else {
+        Err(Box::new(std::io::Error::other("bad token number")))
     }
 }
 
@@ -795,9 +805,16 @@ impl From<AckKind> for Bytes {
 /// Information about a received message
 #[derive(Debug, Clone)]
 pub struct Info<'a> {
-    /// Optional domain, present in servers post-ADR-15
+    /// JetStream domain the message was delivered from.
+    ///
+    /// Only present in the `v2` ack subject (ADR-15), which nats-server sends when the
+    /// `js_ack_fc_v2` feature flag is on. That is the default from server 2.16. `None` when the
+    /// server has no domain configured or sends the `v1` subject.
     pub domain: Option<&'a str>,
-    /// Optional account hash, present in servers post-ADR-15
+    /// Hash of the account the message belongs to.
+    ///
+    /// Only present in the `v2` ack subject. Used by the server for routing; the client does not
+    /// interpret it.
     pub acc_hash: Option<&'a str>,
     /// The stream name
     pub stream: &'a str,
@@ -813,6 +830,102 @@ pub struct Info<'a> {
     pub pending: u64,
     /// the time that this message was received by the server from its publisher
     pub published: DateTime,
-    /// Optional token, present in servers post-ADR-15
+    /// Optional trailing token after the pending count in the `v2` ack subject.
+    ///
+    /// ADR-15 reserves room for it, but no nats-server release sends one, so this is currently
+    /// always `None`. Any further tokens after it are ignored.
     pub token: Option<&'a str>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_info;
+
+    const TS: &str = "1790230470084404000";
+
+    #[test]
+    fn parses_v1_nine_token_reply() {
+        let reply = format!("$JS.ACK.events.durable.3.100.7.{TS}.42");
+        let info = parse_info(&reply).unwrap();
+        assert_eq!(info.domain, None);
+        assert_eq!(info.acc_hash, None);
+        assert_eq!(info.stream, "events");
+        assert_eq!(info.consumer, "durable");
+        assert_eq!(info.delivered, 3);
+        assert_eq!(info.stream_sequence, 100);
+        assert_eq!(info.consumer_sequence, 7);
+        assert_eq!(info.pending, 42);
+        assert_eq!(info.token, None);
+    }
+
+    // Exactly what nats-server sends with `js_ack_fc_v2` enabled (default from 2.16):
+    // 11 tokens, no trailing token.
+    #[test]
+    fn parses_v2_eleven_token_reply_without_domain() {
+        let reply = format!("$JS.ACK._.szMpdrwD.events.4z6UI6IG.1.1.1.{TS}.1");
+        let info = parse_info(&reply).unwrap();
+        assert_eq!(info.domain, None);
+        assert_eq!(info.acc_hash, Some("szMpdrwD"));
+        assert_eq!(info.stream, "events");
+        assert_eq!(info.consumer, "4z6UI6IG");
+        assert_eq!(info.delivered, 1);
+        assert_eq!(info.stream_sequence, 1);
+        assert_eq!(info.consumer_sequence, 1);
+        assert_eq!(info.pending, 1);
+        assert_eq!(info.token, None);
+    }
+
+    #[test]
+    fn parses_v2_eleven_token_reply_with_domain() {
+        let reply = format!("$JS.ACK.hub.szMpdrwD.events.durable.2.50.9.{TS}.0");
+        let info = parse_info(&reply).unwrap();
+        assert_eq!(info.domain, Some("hub"));
+        assert_eq!(info.acc_hash, Some("szMpdrwD"));
+        assert_eq!(info.stream, "events");
+        assert_eq!(info.consumer, "durable");
+        assert_eq!(info.pending, 0);
+        assert_eq!(info.token, None);
+    }
+
+    #[test]
+    fn parses_v2_twelve_token_reply_with_trailing_token() {
+        let reply = format!("$JS.ACK.hub.szMpdrwD.events.durable.2.50.9.{TS}.0.rand");
+        let info = parse_info(&reply).unwrap();
+        assert_eq!(info.domain, Some("hub"));
+        assert_eq!(info.stream, "events");
+        assert_eq!(info.token, Some("rand"));
+    }
+
+    #[test]
+    fn ignores_tokens_beyond_twelve() {
+        let reply = format!("$JS.ACK.hub.szMpdrwD.events.durable.2.50.9.{TS}.0.rand.future.more");
+        let info = parse_info(&reply).unwrap();
+        assert_eq!(info.stream, "events");
+        assert_eq!(info.pending, 0);
+        assert_eq!(info.token, Some("rand"));
+    }
+
+    #[test]
+    fn rejects_eight_token_reply() {
+        let reply = format!("$JS.ACK.events.durable.3.100.7.{TS}");
+        assert!(parse_info(&reply).is_err());
+    }
+
+    #[test]
+    fn rejects_ten_token_reply() {
+        let reply = format!("$JS.ACK.hub.szMpdrwD.events.durable.2.50.9.{TS}");
+        assert!(parse_info(&reply).is_err());
+    }
+
+    #[test]
+    fn rejects_wrong_prefix() {
+        let reply = format!("$JS.FC.events.durable.3.100.7.{TS}.42");
+        assert!(parse_info(&reply).is_err());
+    }
+
+    #[test]
+    fn rejects_non_numeric_sequence() {
+        let reply = format!("$JS.ACK.events.durable.3.abc.7.{TS}.42");
+        assert!(parse_info(&reply).is_err());
+    }
 }
