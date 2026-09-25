@@ -982,13 +982,18 @@ impl tokio::io::AsyncRead for Object {
 
         if self.has_pending_messages {
             if self.subscription.is_none() {
-                let future = match self.subscription_future.as_mut() {
+                // Taken out of `self`, and put back only while it is still
+                // pending: a future that has resolved must never be polled
+                // again. Leaving a finished one in place would panic the
+                // task on the next `poll_read` — which is what a caller
+                // retrying after the error below does.
+                let mut future = match self.subscription_future.take() {
                     Some(future) => future,
                     None => {
                         let stream = self.stream.clone();
                         let bucket = self.info.bucket.clone();
                         let nuid = self.info.nuid.clone();
-                        self.subscription_future.insert(Box::pin(async move {
+                        Box::pin(async move {
                             stream
                                 .create_consumer(OrderedConfig {
                                     deliver_subject: stream.context.client.new_inbox(),
@@ -996,17 +1001,39 @@ impl tokio::io::AsyncRead for Object {
                                     ..Default::default()
                                 })
                                 .await
-                                .unwrap()
+                                .map_err(|err| {
+                                    let kind = match err.kind() {
+                                        ConsumerErrorKind::TimedOut => StreamErrorKind::TimedOut,
+                                        _ => StreamErrorKind::Other,
+                                    };
+                                    StreamError::with_source(kind, err)
+                                })?
                                 .messages()
                                 .await
-                        }))
+                        })
+                            as BoxFuture<'static, Result<Ordered, StreamError>>
                     }
                 };
                 match future.as_mut().poll(cx) {
+                    // The future is done and dropped here. A retry after the
+                    // error builds a fresh one and asks the server again.
                     Poll::Ready(subscription) => {
-                        self.subscription = Some(subscription.unwrap());
+                        self.subscription = Some(subscription.map_err(|err| {
+                            // The kind survives the crossing: a caller
+                            // holding only the `io::Error` can still tell a
+                            // transient timeout from a permanent failure,
+                            // and the original error stays as its source.
+                            match err.kind() {
+                                StreamErrorKind::TimedOut => {
+                                    std::io::Error::new(std::io::ErrorKind::TimedOut, err)
+                                }
+                                _ => std::io::Error::other(err),
+                            }
+                        })?);
                     }
-                    Poll::Pending => (),
+                    Poll::Pending => {
+                        self.subscription_future = Some(future);
+                    }
                 }
             }
             if let Some(subscription) = self.subscription.as_mut() {
