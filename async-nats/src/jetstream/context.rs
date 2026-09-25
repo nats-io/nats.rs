@@ -13,13 +13,14 @@
 //
 //! Manage operations on [Context], create/delete/update [Stream]
 
+use crate::client::RequestDropGuard;
 use crate::error::Error;
 use crate::jetstream::account::Account;
 use crate::jetstream::message::PublishMessage;
 use crate::jetstream::publish::PublishAck;
 use crate::jetstream::response::Response;
 use crate::subject::ToSubject;
-use crate::{is_valid_subject, jetstream, Client, Command, Message, StatusCode};
+use crate::{is_valid_subject, jetstream, Client, Message, StatusCode};
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Future, StreamExt, TryFutureExt};
@@ -34,7 +35,7 @@ use std::pin::Pin;
 use std::str::from_utf8;
 use std::sync::Arc;
 use std::task::Poll;
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, TryAcquireError};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, TryAcquireError};
 use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
@@ -115,14 +116,13 @@ pub struct Context {
     pub(crate) prefix: String,
     pub(crate) timeout: Duration,
     pub(crate) max_ack_semaphore: Arc<tokio::sync::Semaphore>,
-    pub(crate) ack_sender:
-        tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    pub(crate) ack_sender: tokio::sync::mpsc::Sender<(RequestDropGuard, OwnedSemaphorePermit)>,
     pub(crate) backpressure_on_inflight: bool,
     pub(crate) semaphore_capacity: usize,
 }
 
 fn spawn_acker(
-    rx: ReceiverStream<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    rx: ReceiverStream<(RequestDropGuard, OwnedSemaphorePermit)>,
     ack_timeout: Duration,
     concurrency: Option<usize>,
 ) -> tokio::task::JoinHandle<()> {
@@ -318,10 +318,9 @@ where
 
     /// Build the [Context] with the given settings.
     pub fn build(self, client: Client) -> Context {
-        let (tx, rx) = tokio::sync::mpsc::channel::<(
-            oneshot::Receiver<Message>,
-            OwnedSemaphorePermit,
-        )>(self.semaphore_capacity);
+        let (tx, rx) = tokio::sync::mpsc::channel::<(RequestDropGuard, OwnedSemaphorePermit)>(
+            self.semaphore_capacity,
+        );
         let stream = ReceiverStream::new(rx);
         spawn_acker(stream, self.ack_timeout, self.concurrency_limit);
         Context {
@@ -521,29 +520,18 @@ impl Context {
                 })?
         };
 
-        let (sender, receiver) = oneshot::channel();
-
-        let respond = self.client.new_inbox().into();
-
-        let send_fut = self
+        let guarded_receiver_fut = self
             .client
-            .sender
-            .send(Command::Request {
-                subject,
-                payload: publish.payload,
-                respond,
-                headers: publish.headers,
-                sender,
-            })
+            .send_guarded_request(subject, publish.payload, publish.headers)
             .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err));
 
-        tokio::time::timeout(self.timeout, send_fut)
+        let guarded_receiver = tokio::time::timeout(self.timeout, guarded_receiver_fut)
             .map_err(|_elapsed| PublishError::new(PublishErrorKind::TimedOut))
             .await??;
 
         Ok(PublishAckFuture {
             timeout: self.timeout,
-            subscription: Some(receiver),
+            subscription: Some(guarded_receiver),
             permit: Some(permit),
             tx: self.ack_sender.clone(),
         })
@@ -1864,9 +1852,9 @@ pub type PublishError = Error<PublishErrorKind>;
 #[derive(Debug)]
 pub struct PublishAckFuture {
     timeout: Duration,
-    subscription: Option<oneshot::Receiver<Message>>,
+    subscription: Option<RequestDropGuard>,
     permit: Option<OwnedSemaphorePermit>,
-    tx: mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
+    tx: mpsc::Sender<(RequestDropGuard, OwnedSemaphorePermit)>,
 }
 
 impl Drop for PublishAckFuture {

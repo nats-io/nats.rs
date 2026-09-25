@@ -18,7 +18,7 @@ use std::future::Future;
 use crate::connection::State;
 use crate::message::OutboundMessage;
 use crate::subject::ToSubject;
-use crate::ServerInfo;
+use crate::{ServerInfo, Subject};
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
 use crate::error::Error;
@@ -85,6 +85,74 @@ fn max_payload_error(sizes: (usize, usize)) -> PublishError {
     )
 }
 
+#[derive(Debug)]
+pub(crate) struct RequestDropGuard {
+    receiver: oneshot::Receiver<Message>,
+    respond: Option<Subject>,
+    tokio_runtime_handle: tokio::runtime::Handle,
+    client_sender: mpsc::WeakSender<Command>,
+}
+
+impl RequestDropGuard {
+    fn new(
+        receiver: oneshot::Receiver<Message>,
+        respond: Subject,
+        tokio_runtime_handle: tokio::runtime::Handle,
+        client_sender: mpsc::WeakSender<Command>,
+    ) -> Self {
+        Self {
+            receiver,
+            respond: Some(respond),
+            tokio_runtime_handle,
+            client_sender,
+        }
+    }
+}
+
+impl Future for RequestDropGuard {
+    type Output = Result<Message, oneshot::error::RecvError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.receiver.try_poll_unpin(cx)
+    }
+}
+
+impl Drop for RequestDropGuard {
+    fn drop(&mut self) {
+        match self.receiver.try_recv() {
+            // The message was sent, we just never consumed it
+            Ok(_) => return,
+            // The sender was dropped, or a message has already been sent + consumed
+            Err(oneshot::error::TryRecvError::Closed) => return,
+            // No message was sent -- this is the path we need to cleanup
+            Err(oneshot::error::TryRecvError::Empty) => (),
+        }
+
+        // client_sender is weak; if upgrade fails, Client was dropped; no cleanup needed
+        let Some(client_sender) = self.client_sender.upgrade() else {
+            return;
+        };
+
+        // should always be Some(); making it Option saves us an extra clone
+        let Some(respond) = self.respond.take() else {
+            return;
+        };
+
+        let op = Command::DiscardRespond { respond };
+
+        // try the happy-path cleanup (no runtime)
+        let op = match client_sender.try_send(op) {
+            Ok(_) => return,
+            Err(err) => err.into_inner(),
+        };
+
+        // fall-back to using the runtime
+        self.tokio_runtime_handle.spawn(async move {
+            let _ = client_sender.send(op).await;
+        });
+    }
+}
+
 /// Client is a `Cloneable` handle to NATS connection.
 /// Client should not be created directly. Instead, one of two methods can be used:
 /// [crate::connect] and [crate::ConnectOptions::connect]
@@ -101,6 +169,7 @@ pub struct Client {
     max_payload: Arc<AtomicUsize>,
     connection_stats: Arc<Statistics>,
     skip_subject_validation: bool,
+    tokio_runtime_handle: tokio::runtime::Handle,
 }
 
 pub mod traits {
@@ -243,6 +312,7 @@ impl Client {
         max_payload: Arc<AtomicUsize>,
         statistics: Arc<Statistics>,
         skip_subject_validation: bool,
+        tokio_runtime_handle: tokio::runtime::Handle,
     ) -> Client {
         let poll_sender = PollSender::new(sender.clone());
         Client {
@@ -257,6 +327,7 @@ impl Client {
             max_payload,
             connection_stats: statistics,
             skip_subject_validation,
+            tokio_runtime_handle,
         }
     }
 
@@ -718,31 +789,22 @@ impl Client {
                 )),
             }
         } else {
-            let (sender, receiver) = oneshot::channel();
-
             let payload = request.payload.unwrap_or_default();
-            let respond = self.new_inbox().into();
             let headers = request.headers;
 
-            self.sender
-                .send(Command::Request {
-                    subject,
-                    payload,
-                    respond,
-                    headers,
-                    sender,
-                })
-                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))
-                .await?;
+            let guarded_receiver = self
+                .send_guarded_request(subject, payload, headers)
+                .await
+                .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
 
             let timeout = request.timeout.unwrap_or(self.request_timeout);
             let request = match timeout {
                 Some(timeout) => {
-                    tokio::time::timeout(timeout, receiver)
+                    tokio::time::timeout(timeout, guarded_receiver)
                         .map_err(|err| RequestError::with_source(RequestErrorKind::TimedOut, err))
                         .await?
                 }
-                None => receiver.await,
+                None => guarded_receiver.await,
             };
 
             match request {
@@ -758,6 +820,35 @@ impl Client {
                 Err(err) => Err(RequestError::with_source(RequestErrorKind::Other, err)),
             }
         }
+    }
+
+    #[expect(clippy::result_large_err)]
+    pub(crate) async fn send_guarded_request(
+        &self,
+        subject: Subject,
+        payload: Bytes,
+        headers: Option<HeaderMap>,
+    ) -> Result<RequestDropGuard, mpsc::error::SendError<Command>> {
+        let (sender, receiver) = oneshot::channel();
+        let respond: Subject = self.new_inbox().into();
+
+        self.sender
+            .send(Command::Request {
+                subject,
+                payload,
+                respond: respond.clone(),
+                headers,
+                sender,
+            })
+            .await?;
+
+        let guard = RequestDropGuard::new(
+            receiver,
+            respond,
+            self.tokio_runtime_handle.clone(),
+            self.sender.downgrade(),
+        );
+        Ok(guard)
     }
 
     /// Create a new globally unique inbox which can be used for replies.
@@ -1069,6 +1160,16 @@ impl Client {
     pub fn statistics(&self) -> Arc<Statistics> {
         self.connection_stats.clone()
     }
+
+    #[cfg(test)]
+    async fn multiplexer_stats(
+        &self,
+    ) -> Result<crate::MultiplexerStats, Box<dyn std::error::Error>> {
+        let (tx, rx) = oneshot::channel();
+
+        self.sender.send(Command::MultiplexerStats(tx)).await?;
+        Ok(rx.await?)
+    }
 }
 
 /// Used for building customized requests.
@@ -1343,4 +1444,41 @@ pub struct Statistics {
     /// Number of times connection was established.
     /// Initial connect will be counted as well, then all successful reconnects.
     pub connects: AtomicU64,
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use futures_util::StreamExt as _;
+
+    #[tokio::test]
+    async fn request_with_no_response_does_not_leak_memory() {
+        const SUBJECT: &str = "horizon";
+
+        let server = nats_server::run_basic_server();
+        let client = crate::connect(server.client_url()).await.unwrap();
+        let mut subscriber = client.subscribe(SUBJECT).await.unwrap();
+        client.flush().await.unwrap();
+
+        let stats = client.multiplexer_stats().await.unwrap();
+        assert_eq!(stats.waiting_senders, 0);
+
+        {
+            let request = client.request(SUBJECT, Bytes::from_static(b"spaceship"));
+            tokio::pin!(request);
+
+            tokio::select! {
+                result = &mut request => panic!("request unexpectedly completed: {result:?}"),
+                message = subscriber.next() => {
+                    message.expect("subscriber should receive the request");
+                }
+            }
+
+            let stats = client.multiplexer_stats().await.unwrap();
+            assert_eq!(stats.waiting_senders, 1);
+        }
+
+        let stats = client.multiplexer_stats().await.unwrap();
+        assert_eq!(stats.waiting_senders, 0);
+    }
 }
