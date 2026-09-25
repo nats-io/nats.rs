@@ -716,15 +716,7 @@ mod object_store {
         assert_eq!(result, 0);
     }
 
-    /// A read whose subscribe failed leaves the object usable: the next
-    /// read is an error too, not a panic.
-    ///
-    /// The ordered consumer a read needs is created lazily, as a future
-    /// kept on the `Object`. Once that future resolves to an error and
-    /// the error is handed out, the future is finished — and polling a
-    /// finished future panics the task it runs in ("`async fn` resumed
-    /// after completion"), which for a caller that retries turns a
-    /// recoverable read error into a panic. Reading twice is the test.
+    // A failed subscribe must surface as an error on every read, not panic on the retry.
     #[tokio::test]
     async fn read_after_a_failed_subscribe_is_an_error_not_a_panic() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
@@ -747,8 +739,7 @@ mod object_store {
 
         let mut object = bucket.get("FOO").await.unwrap();
 
-        // The consumer is created on the first read, so taking the
-        // bucket away now is what makes that creation fail.
+        // The consumer is created on the first read; removing the bucket makes that fail.
         jetstream.delete_object_store("bucket").await.unwrap();
 
         let mut buffer = [0; 8];
@@ -756,19 +747,12 @@ mod object_store {
         object.read(&mut buffer).await.unwrap_err();
     }
 
-    /// A timed-out read keeps its kind across the `AsyncRead` boundary.
-    ///
-    /// The `io::Error` is all an `AsyncRead` caller ever sees, so unless
-    /// the timeout arrives there as `ErrorKind::TimedOut`, retry logic
-    /// cannot tell a cluster that is merely slow from one that will
-    /// never answer.
+    // A timed-out read must surface as `io::ErrorKind::TimedOut`.
     #[tokio::test]
     async fn a_timed_out_read_keeps_its_kind() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
 
-        // Setting up the object runs on a client with the ordinary
-        // request timeout. Only the read is asked to give up quickly, so
-        // a slow machine cannot make the SETUP the thing that times out.
+        // Only the reading client gets a short request timeout.
         let client = async_nats::connect(server.client_url()).await.unwrap();
         let jetstream = async_nats::jetstream::new(client);
 
@@ -800,9 +784,7 @@ mod object_store {
             .await
             .unwrap();
 
-        // With the server gone, the consumer request the first read
-        // sends has nobody to answer it, and ages out at that client's
-        // request timeout.
+        // The consumer request sent by the first read times out against a dead server.
         drop(server);
 
         let mut buffer = [0; 8];
