@@ -825,11 +825,11 @@ impl ConnectOptions {
         self
     }
 
-    /// By default, Client dispatches op's to the Client onto the channel with capacity of 128.
-    /// This option enables overriding it.
+    /// By default, Client dispatches commands onto a client channel with capacity `2048`.
+    /// This option lets you override that capacity.
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// # #[tokio::main]
     /// # async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     /// async_nats::ConnectOptions::new()
