@@ -390,6 +390,10 @@ pub struct OrderedConfig {
     pub deliver_subject: String,
     /// A name of the consumer. Can be specified for both durable and ephemeral
     /// consumers.
+    ///
+    /// When the consumer is recreated, the replacement is named `{name}_{n}`,
+    /// where `n` counts the recreates. Without a name, the name the server gave
+    /// the first consumer is used instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// A short description of the purpose of this consumer.
@@ -517,6 +521,8 @@ impl Consumer<OrderedConfig> {
         let state = self.context.client.state.clone();
         Ok(Ordered {
             context: self.context.clone(),
+            consumer_name: self.info.name.clone(),
+            serial: 0,
             consumer: self,
             subscriber: Some(subscriber),
             subscriber_future: None,
@@ -533,6 +539,8 @@ impl Consumer<OrderedConfig> {
 pub struct Ordered {
     context: Context,
     consumer: Consumer<OrderedConfig>,
+    consumer_name: String,
+    serial: u64,
     subscriber: Option<Subscriber>,
     subscriber_future: Option<BoxFuture<'static, Result<Subscriber, ConsumerRecreateError>>>,
     stream_sequence: Arc<AtomicU64>,
@@ -603,9 +611,15 @@ impl futures_util::Stream for Ordered {
                 // Ensure we have a recreation future
                 if self.subscriber_future.is_none() {
                     trace!("Creating subscriber recreation future");
+                    self.serial += 1;
+                    let name = format!("{}_{}", self.consumer.info.name, self.serial);
+                    let consumer_name = std::mem::replace(&mut self.consumer_name, name.clone());
                     let context = self.context.clone();
                     let sequence = self.stream_sequence.clone();
-                    let config = self.consumer.config.clone();
+                    let config = OrderedConfig {
+                        name: Some(name),
+                        ..self.consumer.config.clone()
+                    };
                     let stream_name = self.consumer.info.stream_name.clone();
 
                     self.subscriber_future = Some(Box::pin(async move {
@@ -614,6 +628,7 @@ impl futures_util::Stream for Ordered {
                                 context.clone(),
                                 config.clone(),
                                 stream_name.clone(),
+                                consumer_name.clone(),
                                 sequence.load(Ordering::Relaxed),
                             )
                         })
@@ -852,8 +867,17 @@ async fn recreate_consumer_and_subscription(
     context: Context,
     mut config: OrderedConfig,
     stream_name: String,
+    consumer_name: String,
     sequence: u64,
 ) -> Result<Subscriber, ConsumerRecreateError> {
+    trace!("delete old consumer before creating new one");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        context.delete_consumer_from_stream(&consumer_name, &stream_name),
+    )
+    .await
+    .ok();
+
     let delivery_subject = context.client.new_inbox();
     config.deliver_subject = delivery_subject;
 

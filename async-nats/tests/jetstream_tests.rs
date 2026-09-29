@@ -1521,6 +1521,173 @@ mod jetstream {
         }
     }
 
+    // Next consumer CREATE or DELETE sent by a client with the "ORDERED" inbox
+    // prefix, as (op, consumer name).
+    async fn next_ordered_request(requests: &mut async_nats::Subscriber) -> (String, String) {
+        loop {
+            let message = tokio::time::timeout(Duration::from_secs(30), requests.next())
+                .await
+                .expect("no request from the ordered consumer")
+                .unwrap();
+            if !message
+                .reply
+                .is_some_and(|reply| reply.starts_with("ORDERED."))
+            {
+                continue;
+            }
+            let tokens: Vec<&str> = message.subject.split('.').collect();
+            if matches!(tokens[3], "CREATE" | "DELETE") {
+                return (tokens[3].into(), tokens.get(5).unwrap_or(&"").to_string());
+            }
+        }
+    }
+
+    // On recreate, an ordered pull consumer deletes the consumer it replaces and
+    // creates `{name}_{serial}` instead, like nats.go.
+    #[tokio::test]
+    async fn pull_ordered_recreate_deletes_previous_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .custom_inbox_prefix("ORDERED")
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let admin = async_nats::connect(server.client_url()).await.unwrap();
+        let admin_context = async_nats::jetstream::new(admin.clone());
+        let mut requests = admin.subscribe("$JS.API.CONSUMER.>").await.unwrap();
+        admin.flush().await.unwrap();
+        let stream = admin_context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for name in [None, Some("ordered".to_string())] {
+            let consumer = context
+                .get_stream("events")
+                .await
+                .unwrap()
+                .create_consumer(pull::OrderedConfig {
+                    name,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            assert_eq!(next_ordered_request(&mut requests).await.0, "CREATE");
+            let base = consumer.cached_info().name.clone();
+            let mut messages = consumer.messages().await.unwrap();
+            let task = tokio::spawn(async move { while messages.next().await.is_some() {} });
+
+            let mut current = base.clone();
+            for serial in 1..=2 {
+                // Wait for a pending pull, so the delete below reaches the client.
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while stream
+                        .consumer_info(&current)
+                        .await
+                        .map(|info| info.num_waiting)
+                        .ok()
+                        != Some(1)
+                    {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("no pull request pending");
+
+                admin_context
+                    .delete_consumer_from_stream(&current, "events")
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    next_ordered_request(&mut requests).await,
+                    ("DELETE".to_string(), current.clone())
+                );
+                current = format!("{base}_{serial}");
+                assert_eq!(
+                    next_ordered_request(&mut requests).await,
+                    ("CREATE".to_string(), current.clone())
+                );
+            }
+            task.abort();
+        }
+    }
+
+    // Same as `pull_ordered_recreate_deletes_previous_consumer`, for the push consumer.
+    // Each recreate waits for missed heartbeats, so this takes about 40 seconds.
+    #[tokio::test]
+    async fn push_ordered_recreate_deletes_previous_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .custom_inbox_prefix("ORDERED")
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let admin = async_nats::connect(server.client_url()).await.unwrap();
+        let admin_context = async_nats::jetstream::new(admin.clone());
+        let mut requests = admin.subscribe("$JS.API.CONSUMER.>").await.unwrap();
+        admin.flush().await.unwrap();
+        let stream = admin_context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for name in [None, Some("ordered".to_string())] {
+            let consumer = context
+                .get_stream("events")
+                .await
+                .unwrap()
+                .create_consumer(push::OrderedConfig {
+                    deliver_subject: "deliver".to_string(),
+                    name,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            assert_eq!(next_ordered_request(&mut requests).await.0, "CREATE");
+            let base = consumer.cached_info().name.clone();
+            let mut messages = consumer.messages().await.unwrap();
+            let task = tokio::spawn(async move { while messages.next().await.is_some() {} });
+
+            let mut current = base.clone();
+            for serial in 1..=2 {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while stream.consumer_info(&current).await.is_err() {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("consumer not created");
+
+                admin_context
+                    .delete_consumer_from_stream(&current, "events")
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    next_ordered_request(&mut requests).await,
+                    ("DELETE".to_string(), current.clone())
+                );
+                current = format!("{base}_{serial}");
+                assert_eq!(
+                    next_ordered_request(&mut requests).await,
+                    ("CREATE".to_string(), current.clone())
+                );
+            }
+            task.abort();
+        }
+    }
+
     #[tokio::test]
     async fn push_ordered_recreate() {
         let mut server =
