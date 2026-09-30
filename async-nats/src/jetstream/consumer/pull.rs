@@ -41,8 +41,8 @@ use crate::subject::Subject;
 use super::PriorityPolicy;
 
 use super::{
-    backoff, AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
-    StreamError, StreamErrorKind,
+    backoff, poll_missed_heartbeat, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
+    IntoConsumerConfig, ReplayPolicy, StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
 
@@ -1118,24 +1118,6 @@ impl futures_util::Stream for Stream {
             return Poll::Ready(None);
         }
 
-        if !self.batch_config.idle_heartbeat.is_zero() {
-            trace!("checking idle hearbeats");
-            let timeout = self.batch_config.idle_heartbeat.saturating_mul(2);
-            match self
-                .heartbeat_timeout
-                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)))
-                .poll_unpin(cx)
-            {
-                Poll::Ready(_) => {
-                    self.heartbeat_timeout = None;
-                    return Poll::Ready(Some(Err(MessagesError::new(
-                        MessagesErrorKind::MissingHeartbeat,
-                    ))));
-                }
-                Poll::Pending => (),
-            }
-        }
-
         loop {
             trace!("pending messages: {}", self.pending_messages);
             if (self.pending_messages <= self.batch_config.batch / 2
@@ -1270,10 +1252,18 @@ impl futures_util::Stream for Stream {
                 }
                 Poll::Pending => {
                     debug!("subscriber still pending");
-                    return std::task::Poll::Pending;
+                    break;
                 }
             }
         }
+
+        let idle_heartbeat = self.batch_config.idle_heartbeat;
+        if poll_missed_heartbeat(&mut self.heartbeat_timeout, idle_heartbeat, cx) {
+            return Poll::Ready(Some(Err(MessagesError::new(
+                MessagesErrorKind::MissingHeartbeat,
+            ))));
+        }
+        Poll::Pending
     }
 }
 

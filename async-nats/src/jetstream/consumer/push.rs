@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use super::{
-    backoff, AckPolicy, Consumer, DeliverPolicy, FromConsumer, IntoConsumerConfig, ReplayPolicy,
-    StreamError, StreamErrorKind,
+    backoff, poll_missed_heartbeat, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
+    IntoConsumerConfig, ReplayPolicy, StreamError, StreamErrorKind,
 };
 
 #[cfg(feature = "server_2_11")]
@@ -125,58 +125,45 @@ impl futures_util::Stream for Messages {
     type Item = Result<Message, MessagesError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
-        if !self.config.idle_heartbeat.is_zero() {
-            let heartbeat_sleep = self.config.idle_heartbeat.saturating_mul(2);
-            match self
-                .heartbeat_sleep
-                .get_or_insert_with(|| Box::pin(tokio::time::sleep(heartbeat_sleep)))
-                .poll_unpin(cx)
-            {
-                Poll::Ready(_) => {
-                    self.heartbeat_sleep = None;
-                    return Poll::Ready(Some(Err(MessagesError::new(
-                        MessagesErrorKind::MissingHeartbeat,
-                    ))));
-                }
-                Poll::Pending => (),
-            }
-        }
-        loop {
-            match self.subscriber.receiver.poll_recv(cx) {
-                Poll::Ready(maybe_message) => {
-                    self.heartbeat_sleep = None;
-                    match maybe_message {
-                        Some(message) => match message.status {
-                            Some(StatusCode::IDLE_HEARTBEAT) => {
-                                if let Some(subject) = message.reply {
-                                    // TODO store pending_publish as a future and return errors from it
-                                    let client = self.context.client.clone();
-                                    tokio::task::spawn(async move {
-                                        client
-                                            .publish(subject, Bytes::from_static(b""))
-                                            .await
-                                            .unwrap();
-                                    });
-                                }
+        while let Poll::Ready(maybe_message) = self.subscriber.receiver.poll_recv(cx) {
+            self.heartbeat_sleep = None;
+            match maybe_message {
+                Some(message) => match message.status {
+                    Some(StatusCode::IDLE_HEARTBEAT) => {
+                        if let Some(subject) = message.reply {
+                            // TODO store pending_publish as a future and return errors from it
+                            let client = self.context.client.clone();
+                            tokio::task::spawn(async move {
+                                client
+                                    .publish(subject, Bytes::from_static(b""))
+                                    .await
+                                    .unwrap();
+                            });
+                        }
 
-                                continue;
-                            }
-                            Some(_) => {
-                                continue;
-                            }
-                            None => {
-                                return Poll::Ready(Some(Ok(jetstream::Message {
-                                    context: self.context.clone(),
-                                    message,
-                                })))
-                            }
-                        },
-                        None => return Poll::Ready(None),
+                        continue;
                     }
-                }
-                Poll::Pending => return Poll::Pending,
+                    Some(_) => {
+                        continue;
+                    }
+                    None => {
+                        return Poll::Ready(Some(Ok(jetstream::Message {
+                            context: self.context.clone(),
+                            message,
+                        })))
+                    }
+                },
+                None => return Poll::Ready(None),
             }
         }
+
+        let idle_heartbeat = self.config.idle_heartbeat;
+        if poll_missed_heartbeat(&mut self.heartbeat_sleep, idle_heartbeat, cx) {
+            return Poll::Ready(Some(Err(MessagesError::new(
+                MessagesErrorKind::MissingHeartbeat,
+            ))));
+        }
+        Poll::Pending
     }
 }
 
@@ -753,17 +740,11 @@ impl futures_util::Stream for Ordered {
                         // buffered messages. That matters because recreation resumes from the
                         // last *delivered* sequence (AckPolicy::None), and on capped/discarding
                         // streams the dropped messages might no longer be replayable.
-                        if self
-                            .heartbeat_sleep
-                            .get_or_insert_with(|| {
-                                Box::pin(tokio::time::sleep(
-                                    ORDERED_IDLE_HEARTBEAT.saturating_mul(2),
-                                ))
-                            })
-                            .poll_unpin(cx)
-                            .is_ready()
-                        {
-                            self.heartbeat_sleep = None;
+                        if poll_missed_heartbeat(
+                            &mut self.heartbeat_sleep,
+                            ORDERED_IDLE_HEARTBEAT,
+                            cx,
+                        ) {
                             self.subscriber = None;
                             self.consumer_sequence.store(0, Ordering::Relaxed);
                             return Poll::Ready(Some(Err(OrderedError::new(

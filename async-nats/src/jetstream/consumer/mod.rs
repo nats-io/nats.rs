@@ -17,9 +17,12 @@ pub mod pull;
 pub mod push;
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
+use std::pin::Pin;
+use std::task;
 use std::time::Duration;
 
 use crate::datetime::{rfc3339, DateTime};
+use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -625,4 +628,26 @@ fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
     } else {
         Duration::from_secs(10)
     }
+}
+
+/// Polls the missed idle heartbeat timer, arming it for `2 * idle_heartbeat` on first use.
+///
+/// Call only once the subscription is drained: buffered messages prove the consumer is alive,
+/// even if the application polled them after the deadline.
+fn poll_missed_heartbeat(
+    timer: &mut Option<Pin<Box<tokio::time::Sleep>>>,
+    idle_heartbeat: Duration,
+    cx: &mut task::Context<'_>,
+) -> bool {
+    if idle_heartbeat.is_zero() {
+        return false;
+    }
+    let missed = timer
+        .get_or_insert_with(|| Box::pin(tokio::time::sleep(idle_heartbeat.saturating_mul(2))))
+        .poll_unpin(cx)
+        .is_ready();
+    if missed {
+        *timer = None;
+    }
+    missed
 }

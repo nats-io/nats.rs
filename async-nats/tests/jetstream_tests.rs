@@ -2045,6 +2045,51 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn push_stream_buffered_messages_survive_idle() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(consumer::push::Config {
+                deliver_subject: "push".into(),
+                durable_name: Some("push".into()),
+                idle_heartbeat: Duration::from_millis(100),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PushConsumer = stream.get_consumer("push").await.unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+        // Empty channel -> Pending, starts the 2x idle_heartbeat timer.
+        assert!(futures_util::FutureExt::now_or_never(messages.next()).is_none());
+        for _ in 0..10 {
+            context
+                .publish("events", "dat".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        // Stream not polled past the timer deadline while messages are buffered.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            let message = messages.next().await.unwrap();
+            assert!(
+                message.is_ok(),
+                "buffered message expected, got {message:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn push_stream_heartbeat() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -2209,6 +2254,54 @@ mod jetstream {
             .take(100);
         while let Some(result) = iter.next().await {
             result.unwrap().ack().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_stream_buffered_messages_survive_idle() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: PullConsumer = stream
+            .create_consumer(consumer::pull::Config {
+                durable_name: Some("pull".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut messages = consumer
+            .stream()
+            .heartbeat(Duration::from_millis(100))
+            .expires(Duration::from_secs(5))
+            .messages()
+            .await
+            .unwrap();
+        // Empty channel -> Pending, starts the 2x idle_heartbeat timer.
+        assert!(futures_util::FutureExt::now_or_never(messages.next()).is_none());
+        for _ in 0..10 {
+            context
+                .publish("events", "dat".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        // Stream not polled past the timer deadline while messages are buffered.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        for _ in 0..10 {
+            let message = messages.next().await.unwrap();
+            assert!(
+                message.is_ok(),
+                "buffered message expected, got {message:?}"
+            );
         }
     }
 
