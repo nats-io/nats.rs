@@ -580,11 +580,9 @@ impl Consumer<OrderedConfig> {
             missed_heartbeats: false,
             create_stream: None,
             context: self.context.clone(),
-            consumer_name: self
-                .config
-                .name
-                .clone()
-                .unwrap_or_else(|| self.context.client.new_inbox()),
+            consumer_name: self.info.name.clone(),
+            name_prefix: self.info.name.clone(),
+            serial: 0,
             consumer: self.config,
             stream: Some(stream),
             stream_name: self.info.stream_name.clone(),
@@ -599,6 +597,10 @@ impl Consumer<OrderedConfig> {
 pub struct OrderedConfig {
     /// A name of the consumer. Can be specified for both durable and ephemeral
     /// consumers.
+    ///
+    /// When the consumer is recreated, the replacement is named `{name}_{n}`,
+    /// where `n` counts the recreates. Without a name, the name the server gave
+    /// the first consumer is used instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// A short description of the purpose of this consumer.
@@ -763,6 +765,8 @@ pub struct Ordered {
     stream_name: String,
     consumer: OrderedConfig,
     consumer_name: String,
+    name_prefix: String,
+    serial: u64,
     stream: Option<Stream>,
     create_stream: Option<BoxFuture<'static, Result<Stream, ConsumerRecreateError>>>,
     consumer_sequence: u64,
@@ -837,11 +841,16 @@ impl futures_util::Stream for Ordered {
         // Recreate consumer if needed
         if recreate {
             self.stream = None;
+            self.serial += 1;
+            let name = format!("{}_{}", self.name_prefix, self.serial);
+            let consumer_name = std::mem::replace(&mut self.consumer_name, name.clone());
             self.create_stream = Some(Box::pin({
                 let context = self.context.clone();
-                let config = self.consumer.clone();
+                let config = OrderedConfig {
+                    name: Some(name),
+                    ..self.consumer.clone()
+                };
                 let stream_name = self.stream_name.clone();
-                let consumer_name = self.consumer_name.clone();
                 let sequence = self.stream_sequence;
                 async move {
                     tryhard::retry_fn(|| {
