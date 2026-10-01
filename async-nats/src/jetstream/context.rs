@@ -634,7 +634,7 @@ impl Context {
         let response: Response<Info> = self.request(subject, &config).await?;
 
         match response {
-            Response::Err { error } => Err(error.into()),
+            Response::Err { error } => Err(create_stream_error_with_config(error, &config)),
             Response::Ok(info) => Ok(Stream {
                 context: self.clone(),
                 info,
@@ -2227,6 +2227,28 @@ impl Display for CreateStreamErrorKind {
 }
 
 pub type CreateStreamError = Error<CreateStreamErrorKind>;
+
+fn create_stream_error_with_config(
+    error: super::errors::Error,
+    config: &Config,
+) -> CreateStreamError {
+    match error.kind() {
+        ErrorCode::STREAM_SUBJECT_OVERLAP => {
+            let subjects = if config.subjects.is_empty() {
+                vec![config.name.clone()]
+            } else {
+                config.subjects.clone()
+            };
+            error
+                .with_description_prefix(format!(
+                    "failed to create stream '{}' with subjects {subjects:?}",
+                    config.name
+                ))
+                .into()
+        }
+        _ => error.into(),
+    }
+}
 
 impl From<super::errors::Error> for CreateStreamError {
     fn from(error: super::errors::Error) -> Self {
