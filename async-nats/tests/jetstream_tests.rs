@@ -1688,6 +1688,145 @@ mod jetstream {
         }
     }
 
+    // Forwards `$JS.SLOW.API.>` requests to `$JS.API.>`, holding consumer creates
+    // for `delay`, like a server that is slow to create consumers.
+    async fn slow_create_proxy(client: async_nats::Client, delay: Duration) {
+        let mut requests = client.subscribe("$JS.SLOW.API.>").await.unwrap();
+        client.flush().await.unwrap();
+        tokio::spawn(async move {
+            while let Some(request) = requests.next().await {
+                let subject = request.subject.replacen("$JS.SLOW.API", "$JS.API", 1);
+                let delay = if subject.starts_with("$JS.API.CONSUMER.CREATE.") {
+                    delay
+                } else {
+                    Duration::ZERO
+                };
+                let client = client.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    client
+                        .publish_with_reply(subject, request.reply.unwrap(), request.payload)
+                        .await
+                        .unwrap();
+                });
+            }
+        });
+    }
+
+    // A slow consumer create during recreate is bounded by the client's request
+    // timeout (10s by default), not a hardcoded 5s.
+    #[tokio::test]
+    async fn pull_ordered_recreate_waits_for_slow_create() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        slow_create_proxy(client.clone(), Duration::from_secs(7)).await;
+        let context = async_nats::jetstream::new(client.clone());
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(pull::OrderedConfig {
+                name: Some("slow".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: OrderedPullConsumer =
+            async_nats::jetstream::with_prefix(client, "$JS.SLOW.API")
+                .get_consumer_from_stream("slow", "events")
+                .await
+                .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        context
+            .publish("events", "1".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        messages.next().await.unwrap().unwrap();
+        context
+            .delete_consumer_from_stream("slow", "events")
+            .await
+            .unwrap();
+        context
+            .publish("events", "2".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let message = tokio::time::timeout(Duration::from_secs(15), messages.next())
+            .await
+            .expect("no message after recreate")
+            .unwrap()
+            .unwrap();
+        assert_eq!(message.payload, "2");
+    }
+
+    // Same as `pull_ordered_recreate_waits_for_slow_create`, for the push consumer.
+    #[tokio::test]
+    async fn push_ordered_recreate_waits_for_slow_create() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        slow_create_proxy(client.clone(), Duration::from_secs(7)).await;
+        let context = async_nats::jetstream::new(client.clone());
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        stream
+            .create_consumer(push::OrderedConfig {
+                deliver_subject: "deliver".to_string(),
+                name: Some("slow".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let consumer: OrderedPushConsumer =
+            async_nats::jetstream::with_prefix(client, "$JS.SLOW.API")
+                .get_consumer_from_stream("slow", "events")
+                .await
+                .unwrap();
+        let mut messages = consumer.messages().await.unwrap();
+
+        context
+            .publish("events", "1".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        messages.next().await.unwrap().unwrap();
+        context
+            .delete_consumer_from_stream("slow", "events")
+            .await
+            .unwrap();
+        context
+            .publish("events", "2".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let message = tokio::time::timeout(Duration::from_secs(25), async {
+            // The push consumer notices the delete through missed heartbeats.
+            assert!(messages.next().await.unwrap().is_err());
+            messages.next().await.unwrap().unwrap()
+        })
+        .await
+        .expect("no message after recreate");
+        assert_eq!(message.payload, "2");
+    }
+
     #[tokio::test]
     async fn push_ordered_recreate() {
         let mut server =

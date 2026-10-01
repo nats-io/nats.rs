@@ -890,19 +890,18 @@ async fn recreate_ephemeral_consumer(
     };
 
     let config = config.clone();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        context.create_consumer_on_stream(
+    context
+        .create_consumer_on_stream(
             jetstream::consumer::push::OrderedConfig {
                 deliver_policy,
                 ..config
             },
             stream_name.clone(),
-        ),
-    )
-    .await
-    .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+        )
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
+        })?;
 
     Ok(())
 }
