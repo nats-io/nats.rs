@@ -234,6 +234,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
 const MULTIPLEXER_SID: u64 = 0;
+const MULTIPLEXER_PRUNE_MIN: usize = 256;
 pub(crate) const DEFAULT_SERVER_MAX_PAYLOAD: usize = 1024 * 1024;
 
 /// A re-export of the `rustls` crate used in this crate,
@@ -455,6 +456,48 @@ struct Multiplexer {
     subject: Subject,
     prefix: Subject,
     senders: HashMap<String, oneshot::Sender<Message>>,
+    /// Size of `senders` at which senders of abandoned requests are pruned: twice the smallest
+    /// size since the last prune, and at least [`MULTIPLEXER_PRUNE_MIN`].
+    prune_at: usize,
+}
+
+impl Multiplexer {
+    fn insert(&mut self, token: String, sender: oneshot::Sender<Message>) {
+        if self.senders.len() >= self.prune_at {
+            self.prune();
+        }
+        self.senders.insert(token, sender);
+    }
+
+    fn remove(&mut self, token: &str) -> Option<oneshot::Sender<Message>> {
+        let sender = self.senders.remove(token)?;
+        // Follow the map down as replies drain it, so that abandoned requests cannot pile up to
+        // the size of a past burst before the next prune.
+        self.prune_at = self
+            .prune_at
+            .min((self.senders.len() * 2).max(MULTIPLEXER_PRUNE_MIN));
+        Some(sender)
+    }
+
+    /// Removes the senders of requests whose callers stopped waiting, e.g. after a timeout.
+    ///
+    /// Such a request dropped its receiver and will never read a reply, so nothing else would
+    /// ever remove its sender. At least half of `prune_at` requests are inserted between two
+    /// prunes, which keeps pruning amortized O(1) per request.
+    fn prune(&mut self) {
+        let len = self.senders.len();
+        self.senders.retain(|_, pending| !pending.is_closed());
+        self.prune_at = (self.senders.len() * 2).max(MULTIPLEXER_PRUNE_MIN);
+        // `retain` visits every bucket, so give back the capacity a past burst left behind.
+        if self.senders.capacity() > 4 * self.prune_at {
+            self.senders.shrink_to(self.prune_at);
+        }
+        debug!(
+            "pruned {} abandoned requests, {} pending",
+            len - self.senders.len(),
+            self.senders.len()
+        );
+    }
 }
 
 /// A connection handler which facilitates communication from channels to a single shared connection.
@@ -787,7 +830,7 @@ impl ConnectionHandler {
                             subject.strip_prefix(multiplexer.prefix.as_ref()).to_owned();
 
                         if let Some(token) = maybe_token {
-                            if let Some(sender) = multiplexer.senders.remove(token) {
+                            if let Some(sender) = multiplexer.remove(token) {
                                 debug!("forwarding message to request with token {}", token);
                                 let message = Message {
                                     subject,
@@ -911,6 +954,7 @@ impl ConnectionHandler {
                         subject,
                         prefix,
                         senders: HashMap::new(),
+                        prune_at: MULTIPLEXER_PRUNE_MIN,
                     })
                 };
                 self.connector
@@ -918,7 +962,7 @@ impl ConnectionHandler {
                     .out_messages
                     .add(1, Ordering::Relaxed);
 
-                multiplexer.senders.insert(token.to_owned(), sender);
+                multiplexer.insert(token.to_owned(), sender);
 
                 let respond: Subject = format!("{}{}", multiplexer.prefix, token).into();
 
@@ -2035,5 +2079,114 @@ mod tests {
         drop(subscriber);
 
         tokio::task::yield_now().await;
+    }
+
+    fn multiplexer() -> Multiplexer {
+        Multiplexer {
+            subject: Subject::from_static("_INBOX.mux.*"),
+            prefix: Subject::from_static("_INBOX.mux."),
+            senders: HashMap::new(),
+            prune_at: MULTIPLEXER_PRUNE_MIN,
+        }
+    }
+
+    fn reply() -> Message {
+        Message {
+            subject: Subject::from_static("_INBOX.mux.reply"),
+            reply: None,
+            payload: Bytes::from_static(b"reply"),
+            headers: None,
+            status: None,
+            description: None,
+            length: 5,
+        }
+    }
+
+    #[test]
+    fn multiplexer_prunes_abandoned_requests() {
+        let mut multiplexer = multiplexer();
+
+        // Dropping the receiver is what a request does when its caller stops waiting.
+        for i in 0..10_000 {
+            let (sender, receiver) = oneshot::channel();
+            drop(receiver);
+            multiplexer.insert(format!("abandoned{i}"), sender);
+        }
+
+        assert!(multiplexer.senders.len() <= MULTIPLEXER_PRUNE_MIN);
+    }
+
+    #[test]
+    fn multiplexer_keeps_pending_requests() {
+        let mut multiplexer = multiplexer();
+        let mut pending = Vec::new();
+
+        for i in 0..1_000 {
+            let (sender, receiver) = oneshot::channel();
+            multiplexer.insert(format!("pending{i}"), sender);
+            pending.push((format!("pending{i}"), receiver));
+
+            for j in 0..10 {
+                let (sender, receiver) = oneshot::channel();
+                drop(receiver);
+                multiplexer.insert(format!("abandoned{i}.{j}"), sender);
+            }
+        }
+
+        // Pruning keeps the map within twice the number of pending requests.
+        assert!(multiplexer.senders.len() <= 2_000);
+
+        for (token, mut receiver) in pending {
+            let sender = multiplexer
+                .remove(&token)
+                .expect("pending request was pruned");
+            sender.send(reply()).unwrap();
+            assert_eq!(receiver.try_recv().unwrap().payload, "reply");
+        }
+    }
+
+    /// Fills the multiplexer with `count` pending requests, then answers all of them.
+    fn answer_burst(multiplexer: &mut Multiplexer, count: usize) {
+        let mut pending = Vec::new();
+        for i in 0..count {
+            let (sender, receiver) = oneshot::channel();
+            multiplexer.insert(format!("burst{i}"), sender);
+            pending.push((format!("burst{i}"), receiver));
+        }
+        for (token, mut receiver) in pending {
+            let sender = multiplexer
+                .remove(&token)
+                .expect("pending request was pruned");
+            sender.send(reply()).unwrap();
+            assert!(receiver.try_recv().is_ok());
+        }
+    }
+
+    #[test]
+    fn multiplexer_prunes_abandoned_requests_after_burst() {
+        let mut multiplexer = multiplexer();
+        answer_burst(&mut multiplexer, 10_000);
+
+        for i in 0..10_000 {
+            let (sender, receiver) = oneshot::channel();
+            drop(receiver);
+            multiplexer.insert(format!("abandoned{i}"), sender);
+        }
+
+        assert!(multiplexer.senders.len() <= MULTIPLEXER_PRUNE_MIN);
+    }
+
+    #[test]
+    fn multiplexer_releases_capacity_after_burst() {
+        let mut multiplexer = multiplexer();
+        answer_burst(&mut multiplexer, 100_000);
+
+        for i in 0..1_000 {
+            let (sender, receiver) = oneshot::channel();
+            drop(receiver);
+            multiplexer.insert(format!("abandoned{i}"), sender);
+        }
+
+        assert!(multiplexer.senders.capacity() <= 4 * MULTIPLEXER_PRUNE_MIN);
     }
 }
