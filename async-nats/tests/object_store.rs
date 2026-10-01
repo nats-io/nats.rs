@@ -319,6 +319,81 @@ mod object_store {
     }
 
     #[tokio::test]
+    async fn modified_cross_client_parity() {
+        // Guards the cross-client parity fix: a foreign client (e.g. nats.go) may
+        // store a meta message whose JSON `mtime` is the zero time. Both Rust read
+        // paths must return the server message timestamp instead of that zeroed
+        // `mtime`, matching ADR-20 and the behavior of other clients
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Simulate a foreign writer, this will publish a meta message with mtime = zero time
+        let name = "FOO";
+        let encoded = base64::engine::general_purpose::URL_SAFE.encode(name);
+        let subject = format!("$O.bucket.M.{encoded}");
+        let payload = format!(
+            r#"{{"name":"{name}","bucket":"bucket","nuid":"zzzzzzzzzzzzzzzzzzzzzz","size":4,"chunks":1,"mtime":"0001-01-01T00:00:00Z"}}"#
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert("Nats-Rollup", "sub");
+        jetstream
+            .publish_with_headers(subject.clone(), headers, payload.clone().into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        // The zero time as parsed from that JSON, in the crate's DateTime type
+        // (chrono or time depending on features). This is what a buggy read would return.
+        let zero = serde_json::from_str::<ObjectInfo>(&payload)
+            .unwrap()
+            .modified
+            .unwrap();
+
+        // The server timestamp IS available on the stored message
+        let raw = jetstream
+            .get_stream("OBJ_bucket")
+            .await
+            .unwrap()
+            .get_last_raw_message_by_subject(&subject)
+            .await
+            .unwrap();
+        let server_time = raw.time;
+        println!("server message time: {server_time}");
+
+        // info() path
+        let info_modified = bucket.info(name).await.unwrap().modified;
+        println!("info().modified:     {info_modified:?}");
+
+        // list() path
+        let mut list = bucket.list().await.unwrap();
+        let listed = list.next().await.unwrap().unwrap();
+        println!("list().modified:     {:?}", listed.modified);
+
+        // Both read paths must return the server timestamp, not the JSON zero time.
+        assert_ne!(server_time, zero, "server time should be non-zero");
+        assert_eq!(
+            info_modified,
+            Some(server_time),
+            "info() should return the server message timestamp"
+        );
+        assert_eq!(
+            listed.modified,
+            Some(server_time),
+            "list() should return the server message timestamp"
+        );
+    }
+
+    #[tokio::test]
     async fn delete() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
