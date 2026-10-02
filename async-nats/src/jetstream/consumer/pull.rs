@@ -2891,19 +2891,18 @@ async fn recreate_consumer_stream(
         }
     };
     trace!("create the new ordered consumer for sequence {}", sequence);
-    let consumer = tokio::time::timeout(
-        Duration::from_secs(5),
-        context.create_consumer_on_stream(
+    let consumer = context
+        .create_consumer_on_stream(
             jetstream::consumer::pull::OrderedConfig {
                 deliver_policy,
                 ..config.clone()
             },
             stream_name,
-        ),
-    )
-    .await
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+        )
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
+        })?;
 
     let batch_config = ordered_batch_config(&consumer.info);
     let config = Consumer {
