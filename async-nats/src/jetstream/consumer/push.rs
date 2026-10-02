@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use super::{
-    backoff, poll_missed_heartbeat, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
+    poll_missed_heartbeat, retry, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
     IntoConsumerConfig, ReplayPolicy, StreamError, StreamErrorKind,
 };
 
@@ -610,7 +610,7 @@ impl futures_util::Stream for Ordered {
                     let stream_name = self.consumer.info.stream_name.clone();
 
                     self.subscriber_future = Some(Box::pin(async move {
-                        tryhard::retry_fn(|| {
+                        retry(u32::MAX, || {
                             recreate_consumer_and_subscription(
                                 context.clone(),
                                 config.clone(),
@@ -619,8 +619,6 @@ impl futures_util::Stream for Ordered {
                                 sequence.load(Ordering::Relaxed),
                             )
                         })
-                        .retries(u32::MAX)
-                        .custom_backoff(backoff)
                         .await
                         .map_err(|err| {
                             ConsumerRecreateError::with_source(
