@@ -17,7 +17,7 @@ mod object_store {
 
     use async_nats::{
         jetstream::{
-            object_store::{AddLinkErrorKind, ObjectMetadata, UpdateMetadata},
+            object_store::{AddLinkErrorKind, InfoErrorKind, ObjectMetadata, UpdateMetadata},
             stream::DirectGetErrorKind,
         },
         HeaderMap,
@@ -316,6 +316,57 @@ mod object_store {
 
         let info = bucket.info("FOO").await.unwrap();
         assert_ne!(info.modified, modified);
+    }
+
+    #[tokio::test]
+    async fn info_uses_direct_get_when_the_stream_allows_it() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "bucket".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let api_errors = || async { jetstream.query_account().await.unwrap().requests.errors };
+
+        let before = api_errors().await;
+        bucket
+            .put("NEW", &mut io::Cursor::new(vec![1, 2, 3]))
+            .await
+            .unwrap();
+        let info = bucket.info("NEW").await.unwrap();
+        assert_eq!(info.name, "NEW");
+        let missing = bucket.info("MISSING").await.unwrap_err();
+        assert_eq!(missing.kind(), InfoErrorKind::NotFound);
+        assert_eq!(
+            api_errors().await,
+            before,
+            "lookups on a direct-enabled bucket must not be counted as JetStream API errors"
+        );
+
+        let stream = jetstream.get_stream("OBJ_bucket").await.unwrap();
+        let config = async_nats::jetstream::stream::Config {
+            allow_direct: false,
+            ..stream.cached_info().config.clone()
+        };
+        jetstream.update_stream(config).await.unwrap();
+        let bucket = jetstream.get_object_store("bucket").await.unwrap();
+
+        let before = api_errors().await;
+        let info = bucket.info("NEW").await.unwrap();
+        assert_eq!(info.name, "NEW");
+        let missing = bucket.info("MISSING").await.unwrap_err();
+        assert_eq!(missing.kind(), InfoErrorKind::NotFound);
+        assert_eq!(
+            api_errors().await,
+            before + 1,
+            "without direct get the missing lookup goes through the API and is counted"
+        );
     }
 
     #[tokio::test]
