@@ -244,24 +244,34 @@ impl ObjectStore {
         // Grab last meta value we have.
         let subject = format!("$O.{}.M.{}", self.name, object_name);
 
-        // FIXME(jrm): we should use direct get here when possible.
-        let message = self
-            .stream
-            .get_last_raw_message_by_subject(subject.as_str())
-            .await
-            .map_err(|err| match err.kind() {
-                stream::LastRawMessageErrorKind::NoMessageFound => {
-                    InfoError::new(InfoErrorKind::NotFound)
-                }
-                _ => InfoError::with_source(InfoErrorKind::Other, err),
-            })?;
-        let object_info =
-            serde_json::from_slice::<ObjectInfo>(&message.payload).map_err(|err| {
-                InfoError::with_source(
-                    InfoErrorKind::Other,
-                    format!("failed to decode info payload: {err}"),
-                )
-            })?;
+        let payload = if self.stream.info.config.allow_direct {
+            self.stream
+                .direct_get_last_for_subject(subject.as_str())
+                .await
+                .map(|message| message.payload)
+                .map_err(|err| match err.kind() {
+                    stream::DirectGetErrorKind::NotFound => InfoError::new(InfoErrorKind::NotFound),
+                    stream::DirectGetErrorKind::TimedOut => InfoError::new(InfoErrorKind::TimedOut),
+                    _ => InfoError::with_source(InfoErrorKind::Other, err),
+                })?
+        } else {
+            self.stream
+                .get_last_raw_message_by_subject(subject.as_str())
+                .await
+                .map(|message| message.payload)
+                .map_err(|err| match err.kind() {
+                    stream::LastRawMessageErrorKind::NoMessageFound => {
+                        InfoError::new(InfoErrorKind::NotFound)
+                    }
+                    _ => InfoError::with_source(InfoErrorKind::Other, err),
+                })?
+        };
+        let object_info = serde_json::from_slice::<ObjectInfo>(&payload).map_err(|err| {
+            InfoError::with_source(
+                InfoErrorKind::Other,
+                format!("failed to decode info payload: {err}"),
+            )
+        })?;
 
         Ok(object_info)
     }
