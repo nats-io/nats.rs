@@ -35,7 +35,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::trace;
 
-use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
+use crate::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::status::StatusCode;
 use crate::subject::Subject;
 use crate::{ClientOp, ServerError, ServerOp, Statistics};
@@ -157,7 +157,8 @@ impl Connection {
         }
 
         if self.read_buf.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.read_buf[5..len])
+            // A bare `-ERR\r\n` has no description, so `len` can be below 5.
+            let description = str::from_utf8(self.read_buf.get(5..len).unwrap_or_default())
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
@@ -212,9 +213,20 @@ impl Connection {
                 .parse::<usize>()
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
+            // A length near `usize::MAX` wraps this sum past the check in release.
+            let Some(required) = len
+                .checked_add(payload_len)
+                .and_then(|len| len.checked_add(4))
+            else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of payload bytes after MSG overflows",
+                ));
+            };
+
             // Return early without advancing if there is not enough data read the entire
             // message
-            if len + payload_len + 4 > self.read_buf.remaining() {
+            if required > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -322,7 +334,17 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.read_buf.remaining() {
+            let Some(required) = len
+                .checked_add(total_len)
+                .and_then(|len| len.checked_add(4))
+            else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of bytes after HMSG overflows",
+                ));
+            };
+
+            if required > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -391,7 +413,11 @@ impl Connection {
                 }
                 value.truncate(value.trim_end().len());
 
-                headers.append(name, value.into_header_value());
+                // `lines` strips a trailing `\r`, but not an interior one.
+                let value = HeaderValue::from_string(value)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+
+                headers.append(name, value);
             }
 
             trace!(
@@ -1192,6 +1218,78 @@ mod read_op {
 
         let err = connection.read_op().await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_lone_cr_in_header_value_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"HMSG a 1 20 20\r\n").await.unwrap();
+        server
+            .write_all(b"NATS/1.0\r\nK: a\rb\r\n\r\n\r\n")
+            .await
+            .unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_folded_header_value_is_joined() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"HMSG a 1 26 26\r\n").await.unwrap();
+        server
+            .write_all(b"NATS/1.0\r\nK: one\r\n two\r\n\r\n\r\n")
+            .await
+            .unwrap();
+
+        let op = connection.read_op().await.unwrap().unwrap();
+        let ServerOp::Message { headers, .. } = op else {
+            panic!("expected a message, got {op:?}");
+        };
+        let headers = headers.expect("headers");
+        assert_eq!(headers.get("K").unwrap().as_str(), "one two");
+    }
+
+    #[tokio::test]
+    async fn msg_with_overflowing_payload_len_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        let line = format!("MSG a 1 {}\r\nxx\r\n", usize::MAX);
+        server.write_all(line.as_bytes()).await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_overflowing_total_len_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        let line = format!("HMSG a 1 12 {}\r\nNATS/1.0\r\n\r\n\r\n", usize::MAX);
+        server.write_all(line.as_bytes()).await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn err_without_description() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"-ERR\r\n").await.unwrap();
+
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Error(ServerError::Other(String::new())))
+        );
     }
 }
 
