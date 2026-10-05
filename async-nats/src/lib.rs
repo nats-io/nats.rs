@@ -226,7 +226,6 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio::io;
 use tokio::sync::mpsc;
-use tokio::task;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -381,9 +380,17 @@ pub(crate) enum ServerOp {
 )]
 pub type PublishMessage = crate::message::OutboundMessage;
 
+#[cfg(test)]
+#[derive(Debug)]
+struct MultiplexerStats {
+    pub waiting_senders: usize,
+}
+
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
 pub(crate) enum Command {
+    #[cfg(test)]
+    MultiplexerStats(oneshot::Sender<MultiplexerStats>),
     Publish(OutboundMessage),
     Request {
         subject: Subject,
@@ -391,6 +398,9 @@ pub(crate) enum Command {
         respond: Subject,
         headers: Option<HeaderMap>,
         sender: oneshot::Sender<Message>,
+    },
+    DiscardRespond {
+        respond: Subject,
     },
     Subscribe {
         sid: u64,
@@ -822,6 +832,20 @@ impl ConnectionHandler {
 
     fn handle_command(&mut self, command: Command) {
         match command {
+            #[cfg(test)]
+            Command::MultiplexerStats(observer) => {
+                let stats = MultiplexerStats {
+                    waiting_senders: self
+                        .multiplexer
+                        .as_ref()
+                        .map(|v| v.senders.len())
+                        .unwrap_or(0),
+                };
+
+                if let Err(err) = observer.send(stats) {
+                    tracing::warn!(?err);
+                }
+            }
             Command::Unsubscribe { sid, max } => {
                 if let Some(subscription) = self.subscriptions.get_mut(&sid) {
                     subscription.max = max;
@@ -930,6 +954,16 @@ impl ConnectionHandler {
                 };
 
                 self.connection.enqueue_write_op(&pub_op);
+            }
+
+            Command::DiscardRespond { respond } => {
+                let Some(multiplexer) = self.multiplexer.as_mut() else {
+                    return;
+                };
+
+                let (_prefix, token) = respond.rsplit_once('.').expect("malformed subject");
+
+                multiplexer.senders.remove(token);
             }
 
             Command::Publish(OutboundMessage {
@@ -1088,6 +1122,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     let (info_sender, info_watcher) = tokio::sync::watch::channel(info.clone());
     let (sender, mut receiver) = mpsc::channel(options.sender_capacity);
 
+    let handle = tokio::runtime::Handle::current();
+
     let client = Client::new(
         info_watcher,
         state_rx,
@@ -1098,9 +1134,10 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         max_payload,
         statistics,
         options.skip_subject_validation,
+        handle.clone(),
     );
 
-    task::spawn(async move {
+    handle.spawn(async move {
         while let Some(event) = events_rx.recv().await {
             tracing::info!("event: {}", event);
             if let Some(event_callback) = &options.event_callback {
@@ -1109,7 +1146,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         }
     });
 
-    task::spawn(async move {
+    handle.spawn(async move {
         if connection.is_none() && options.retry_on_initial_connect {
             let (info, connection_ok) = match connector.connect().await {
                 Ok((info, connection)) => (info, connection),
