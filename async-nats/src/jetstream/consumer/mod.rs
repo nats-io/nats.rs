@@ -623,7 +623,7 @@ crate::from_with_timeout!(
     crate::jetstream::stream::ConsumerErrorKind
 );
 
-fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
+fn backoff(attempt: u32) -> Duration {
     if attempt < 5 {
         Duration::from_millis(500 * attempt as u64)
     } else {
@@ -637,16 +637,15 @@ async fn retry<T, E, F, Fut>(max_retries: u32, mut f: F) -> Result<T, E>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, E>>,
-    E: std::error::Error,
 {
     let mut attempt = 0;
     loop {
         let delay = match f().await {
             Ok(value) => return Ok(value),
             Err(err) if attempt == max_retries => return Err(err),
-            Err(err) => {
+            Err(_) => {
                 attempt += 1;
-                backoff(attempt, &err)
+                backoff(attempt)
             }
         };
         tokio::time::sleep(delay).await;
