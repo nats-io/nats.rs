@@ -542,6 +542,8 @@ pub struct Ordered {
         Option<BoxFuture<'static, Result<(), tokio::sync::watch::error::RecvError>>>,
 }
 
+// Only the KV history and keys streams use these.
+#[cfg_attr(not(feature = "kv"), allow(dead_code))]
 impl Ordered {
     /// Number of idle heartbeats received while in sync with the current consumer.
     ///
