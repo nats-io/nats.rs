@@ -1142,22 +1142,228 @@ mod kv {
             .unwrap();
 
         kv.put("baz", "value".into()).await.unwrap();
-        tryhard::retry_fn(|| async {
-            match kv.keys().await {
-                Ok(keys) => {
-                    let keys = keys.try_collect::<Vec<String>>().await.unwrap();
-                    if !keys.is_empty() {
-                        return Err("keys not empty".into());
-                    }
-                    Ok::<(), async_nats::Error>(())
-                }
-                Err(e) => Err(e.into()),
+
+        // Wait for max_age to remove the entry before listing, so the result does not depend on
+        // whether expiry wins a race against `keys()`.
+        let mut stream = context.get_stream("KV_history2").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while stream.info().await.unwrap().state.messages > 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
-        .retries(5)
-        .exponential_backoff(Duration::from_millis(100))
         .await
+        .expect("entry did not expire");
+
+        let keys = kv
+            .keys()
+            .await
+            .unwrap()
+            .try_collect::<Vec<String>>()
+            .await
+            .unwrap();
+        assert!(keys.is_empty(), "expired key listed: {keys:?}");
+    }
+
+    #[tokio::test]
+    async fn history_of_missing_key_is_empty() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                history: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        kv.put("present", "value".into()).await.unwrap();
+
+        let history = tokio::time::timeout(Duration::from_secs(2), async {
+            kv.history("missing")
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+        })
+        .await
+        .expect("history of a missing key never finished")
         .unwrap();
+        assert!(history.is_empty());
+    }
+
+    // `keys()` sees one pending entry when it creates its consumer, but the entry is removed
+    // (as by max_age expiry) before it is delivered. The listing must still finish.
+    #[tokio::test]
+    async fn keys_entry_removed_before_delivery() {
+        let (_server, context, proxy) = pending_entry_removed_setup("removed").await;
+        let kv = context.get_key_value("removed").await.unwrap();
+
+        let keys =
+            tokio::spawn(
+                async move { kv.keys().await.unwrap().try_collect::<Vec<String>>().await },
+            );
+        proxy.remove_entries_before_delivery("KV_removed").await;
+
+        let keys = tokio::time::timeout(Duration::from_secs(20), keys)
+            .await
+            .expect("keys() never finished")
+            .unwrap()
+            .unwrap();
+        assert!(keys.is_empty(), "removed key listed: {keys:?}");
+    }
+
+    // Same as `keys_entry_removed_before_delivery`, for `history()`.
+    #[tokio::test]
+    async fn history_entry_removed_before_delivery() {
+        let (_server, context, proxy) = pending_entry_removed_setup("removed").await;
+        let kv = context.get_key_value("removed").await.unwrap();
+
+        let history = tokio::spawn(async move {
+            kv.history("key")
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+        });
+        proxy.remove_entries_before_delivery("KV_removed").await;
+
+        let history = tokio::time::timeout(Duration::from_secs(20), history)
+            .await
+            .expect("history() never finished")
+            .unwrap()
+            .unwrap();
+        assert!(history.is_empty(), "removed entry returned: {history:?}");
+    }
+
+    /// Creates bucket `bucket` holding one entry, and a JetStream context whose connection goes
+    /// through a [`SubHoldingProxy`].
+    async fn pending_entry_removed_setup(
+        bucket: &str,
+    ) -> (
+        nats_server::Server,
+        async_nats::jetstream::Context,
+        SubHoldingProxy,
+    ) {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let admin = async_nats::connect(server.client_url()).await.unwrap();
+        let admin = async_nats::jetstream::new(admin);
+        admin
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: bucket.into(),
+                history: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .put("key", "value".into())
+            .await
+            .unwrap();
+
+        let proxy = SubHoldingProxy::start(server.client_port(), admin).await;
+        let client = async_nats::connect(format!("nats://127.0.0.1:{}", proxy.port))
+            .await
+            .unwrap();
+        (server, async_nats::jetstream::new(client), proxy)
+    }
+
+    /// TCP proxy that holds the client's first `SUB` after a consumer create request until told
+    /// to continue. The consumer then exists on the server, but nothing can be delivered to it.
+    struct SubHoldingProxy {
+        port: u16,
+        admin: async_nats::jetstream::Context,
+        held: tokio::sync::oneshot::Receiver<()>,
+        release: tokio::sync::oneshot::Sender<()>,
+    }
+
+    impl SubHoldingProxy {
+        async fn start(server_port: u16, admin: async_nats::jetstream::Context) -> Self {
+            use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+            // Bind the wildcard address: a listener on 127.0.0.1 can share its port with a test
+            // server listening on the wildcard address, and would steal that server's clients.
+            let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (held_tx, held) = tokio::sync::oneshot::channel();
+            let (release, release_rx) = tokio::sync::oneshot::channel::<()>();
+
+            tokio::spawn(async move {
+                let (downstream, _) = listener.accept().await.unwrap();
+                let upstream = tokio::net::TcpStream::connect(("127.0.0.1", server_port))
+                    .await
+                    .unwrap();
+                let (client_read, mut client_write) = downstream.into_split();
+                let (mut server_read, mut server_write) = upstream.into_split();
+                tokio::spawn(async move {
+                    tokio::io::copy(&mut server_read, &mut client_write)
+                        .await
+                        .ok();
+                });
+
+                let mut client_read = tokio::io::BufReader::new(client_read);
+                let mut held_tx = Some(held_tx);
+                let mut release_rx = Some(release_rx);
+                let mut consumer_created = false;
+                loop {
+                    let mut op = Vec::new();
+                    if client_read.read_until(b'\n', &mut op).await.unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let line = String::from_utf8_lossy(&op).to_string();
+                    let mut tokens = line.split_whitespace();
+                    match tokens.next() {
+                        Some("PUB") | Some("HPUB") => {
+                            let tokens: Vec<&str> = tokens.collect();
+                            if tokens[0].starts_with("$JS.API.CONSUMER.CREATE.") {
+                                consumer_created = true;
+                            }
+                            let size: usize = tokens.last().unwrap().parse().unwrap();
+                            let mut payload = vec![0; size + 2];
+                            client_read.read_exact(&mut payload).await.unwrap();
+                            op.extend_from_slice(&payload);
+                        }
+                        Some("SUB") if consumer_created => {
+                            if let (Some(held_tx), Some(release_rx)) =
+                                (held_tx.take(), release_rx.take())
+                            {
+                                held_tx.send(()).ok();
+                                release_rx.await.ok();
+                            }
+                        }
+                        _ => {}
+                    }
+                    if server_write.write_all(&op).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            SubHoldingProxy {
+                port,
+                admin,
+                held,
+                release,
+            }
+        }
+
+        /// Waits until the consumer exists with its entries still pending, removes all entries
+        /// from `stream` without writing markers (as max_age expiry does), then lets the client
+        /// subscribe.
+        async fn remove_entries_before_delivery(self, stream: &str) {
+            tokio::time::timeout(Duration::from_secs(10), self.held)
+                .await
+                .expect("consumer was never created")
+                .unwrap();
+            self.admin
+                .get_stream(stream)
+                .await
+                .unwrap()
+                .purge()
+                .await
+                .unwrap();
+            self.release.send(()).unwrap();
+        }
     }
 
     #[tokio::test]

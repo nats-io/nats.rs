@@ -25,7 +25,7 @@ use std::{
 use crate::datetime::DateTime;
 use crate::HeaderValue;
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{future::BoxFuture, FutureExt, StreamExt};
 use regex::Regex;
 use std::sync::LazyLock;
 use tracing::debug;
@@ -36,7 +36,7 @@ use crate::header;
 use self::bucket::Status;
 
 use super::{
-    consumer::{push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
+    consumer::{self, push::OrderedError, DeliverPolicy, StreamError, StreamErrorKind},
     context::{PublishError, PublishErrorKind},
     message::StreamMessage,
     stream::{
@@ -1282,10 +1282,12 @@ impl Store {
             .await?;
 
         Ok(History {
+            done: consumer.info.num_pending == 0,
             subscription: consumer.messages().await?,
-            done: false,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
+            checked_heartbeats: 0,
+            delivered_all: None,
         })
     }
 
@@ -1358,6 +1360,8 @@ impl Store {
             subscription: consumer.messages().await?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
+            checked_heartbeats: 0,
+            delivered_all: None,
         };
 
         Ok(Keys { inner: entries })
@@ -1431,6 +1435,10 @@ pub struct History {
     done: bool,
     prefix: String,
     bucket: String,
+    /// Idle heartbeats already followed by a check whether everything was delivered.
+    checked_heartbeats: u64,
+    /// In-flight consumer info request for that check.
+    delivered_all: Option<BoxFuture<'static, Result<consumer::Info, crate::Error>>>,
 }
 
 impl futures_util::Stream for History {
@@ -1440,50 +1448,85 @@ impl futures_util::Stream for History {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if self.done {
-            return Poll::Ready(None);
-        }
-        match self.subscription.poll_next_unpin(cx) {
-            Poll::Ready(message) => match message {
-                None => Poll::Ready(None),
-                Some(message) => {
-                    let message = message?;
-                    let info = message.info().map_err(|err| {
-                        WatcherError::with_source(
-                            WatcherErrorKind::Other,
-                            format!("failed to parse message metadata: {err}"),
-                        )
-                    })?;
-                    if info.pending == 0 {
+        loop {
+            if self.done {
+                return Poll::Ready(None);
+            }
+            match self.subscription.poll_next_unpin(cx) {
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(Some(message)) => return Poll::Ready(Some(self.entry(message))),
+                Poll::Pending => {}
+            }
+
+            // The pending count taken when the consumer was created can go stale: entries may be
+            // removed (max_age, purge) before they are delivered, and then no entry with
+            // `pending == 0` ever arrives. After each idle heartbeat, ask the server whether the
+            // consumer has anything left to deliver.
+            if self.delivered_all.is_none()
+                && self.subscription.idle_heartbeats() > self.checked_heartbeats
+            {
+                self.checked_heartbeats = self.subscription.idle_heartbeats();
+                self.delivered_all = Some(self.subscription.consumer_info());
+            }
+            let Some(check) = self.delivered_all.as_mut() else {
+                return Poll::Pending;
+            };
+            match check.poll_unpin(cx) {
+                Poll::Ready(Ok(info)) => {
+                    self.delivered_all = None;
+                    if self.subscription.delivered_all(&info) {
                         self.done = true;
                     }
-
-                    let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
-
-                    let key = message
-                        .subject
-                        .strip_prefix(&self.prefix)
-                        .map(|s| s.to_string())
-                        .unwrap();
-
-                    Poll::Ready(Some(Ok(Entry {
-                        bucket: self.bucket.clone(),
-                        key,
-                        value: message.payload.clone(),
-                        revision: info.stream_sequence,
-                        created: info.published,
-                        delta: info.pending,
-                        operation,
-                        seen_current: self.done,
-                    })))
                 }
-            },
-            std::task::Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(err)) => {
+                    // Checked again on the next idle heartbeat.
+                    debug!("failed to check if history was fully delivered: {err}");
+                    self.delivered_all = None;
+                }
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
+    }
+}
+
+impl History {
+    fn entry(
+        &mut self,
+        message: Result<crate::jetstream::Message, OrderedError>,
+    ) -> Result<Entry, WatcherError> {
+        let message = message?;
+        let info = message.info().map_err(|err| {
+            WatcherError::with_source(
+                WatcherErrorKind::Other,
+                format!("failed to parse message metadata: {err}"),
+            )
+        })?;
+        if info.pending == 0 {
+            self.done = true;
+        }
+
+        let operation = kv_operation_from_message(&message).unwrap_or(Operation::Put);
+
+        let key = message
+            .subject
+            .strip_prefix(&self.prefix)
+            .map(|s| s.to_string())
+            .unwrap();
+
+        Ok(Entry {
+            bucket: self.bucket.clone(),
+            key,
+            value: message.payload.clone(),
+            revision: info.stream_sequence,
+            created: info.published,
+            delta: info.pending,
+            operation,
+            seen_current: self.done,
+        })
     }
 }
 
