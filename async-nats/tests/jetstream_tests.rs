@@ -3574,10 +3574,12 @@ mod jetstream {
             .await
             .unwrap();
 
+        // Durable, so the server does not remove consumers created early for inactivity while the
+        // rest are still being created.
         for i in 0..235 {
             stream
                 .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                    name: Some(format!("consumer_{i}")),
+                    durable_name: Some(format!("consumer_{i}")),
                     ..Default::default()
                 })
                 .await

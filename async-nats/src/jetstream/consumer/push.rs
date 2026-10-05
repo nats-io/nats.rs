@@ -22,7 +22,7 @@ use super::PriorityPolicy;
 use crate::{
     connection::State,
     error::Error,
-    jetstream::{self, Context, Message},
+    jetstream::{self, response::Response, Context, Message},
     StatusCode, Subscriber,
 };
 
@@ -516,6 +516,7 @@ impl Consumer<OrderedConfig> {
             stream_sequence: last_sequence,
             consumer_sequence,
             heartbeat_sleep: None,
+            idle_heartbeats: 0,
             state,
             last_known_state: State::Connected,
             state_change_future: None,
@@ -533,10 +534,48 @@ pub struct Ordered {
     stream_sequence: Arc<AtomicU64>,
     consumer_sequence: Arc<AtomicU64>,
     heartbeat_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+    /// Idle heartbeats received while in sync with the current consumer.
+    idle_heartbeats: u64,
     state: tokio::sync::watch::Receiver<State>,
     last_known_state: State,
     state_change_future:
         Option<BoxFuture<'static, Result<(), tokio::sync::watch::error::RecvError>>>,
+}
+
+// Only the KV history and keys streams use these.
+#[cfg_attr(not(feature = "kv"), allow(dead_code))]
+impl Ordered {
+    /// Number of idle heartbeats received while in sync with the current consumer.
+    ///
+    /// The server sends one when a heartbeat interval passes without a delivery.
+    pub(crate) fn idle_heartbeats(&self) -> u64 {
+        self.idle_heartbeats
+    }
+
+    /// Fetches the server's info for the current consumer, to check with
+    /// [`Ordered::delivered_all`].
+    pub(crate) fn consumer_info(&self) -> BoxFuture<'static, Result<super::Info, crate::Error>> {
+        let context = self.context.clone();
+        let subject = format!(
+            "CONSUMER.INFO.{}.{}",
+            self.consumer.info.stream_name, self.consumer_name
+        );
+        Box::pin(async move {
+            match context.request(subject, &serde_json::json!({})).await? {
+                Response::Ok(info) => Ok(info),
+                Response::Err { error } => Err(error.into()),
+            }
+        })
+    }
+
+    /// Whether `info`, fetched for the current consumer, shows nothing left to deliver and every
+    /// delivered message already received.
+    pub(crate) fn delivered_all(&self, info: &super::Info) -> bool {
+        self.subscriber.is_some()
+            && info.name == self.consumer_name
+            && info.num_pending == 0
+            && info.delivered.consumer_sequence == self.consumer_sequence.load(Ordering::Relaxed)
+    }
 }
 
 impl futures_util::Stream for Ordered {
@@ -675,6 +714,11 @@ impl futures_util::Stream for Ordered {
                                             self.heartbeat_sleep = None;
                                         }
                                     }
+                                }
+                                // Flow control requests carry a reply subject, idle heartbeats do
+                                // not.
+                                if message.reply.is_none() && self.subscriber.is_some() {
+                                    self.idle_heartbeats += 1;
                                 }
                                 // flow control.
                                 if let Some(subject) = message.reply.clone() {
