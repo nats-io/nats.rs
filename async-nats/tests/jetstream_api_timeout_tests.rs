@@ -12,8 +12,9 @@
 // limitations under the License.
 
 //! A JetStream API request is bounded by the context timeout when one was set, otherwise by the
-//! connection's request timeout. Tests put a proxy between the context and the server that
-//! forwards, delays or swallows requests.
+//! connection's request timeout. Ordered consumer recreation follows the same rule, with a
+//! 10 second floor when neither is set. Tests put a proxy between the context and the server
+//! that forwards, delays or swallows requests.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 use async_nats::client::traits::Requester;
 use async_nats::jetstream::{
     self,
-    consumer::pull,
+    consumer::{pull, push},
     context::{AccountErrorKind, RequestErrorKind},
     stream,
 };
@@ -540,4 +541,117 @@ async fn ordered_recreate_retries_a_lost_create_after_the_context_timeout() {
         .unwrap();
     assert_eq!(second.payload.as_ref(), b"second");
     assert!(deleted_at.elapsed() >= Duration::from_secs(1));
+}
+
+// The recreate waits for the full context timeout, also above 5 seconds: nothing caps it.
+#[tokio::test]
+async fn ordered_recreate_honors_a_context_timeout_above_five_seconds() {
+    let (server, client, mut context) = setup().await;
+    let proxy = proxy(client, Duration::ZERO).await;
+    context.set_timeout(Duration::from_secs(7));
+    let (mut messages, deleted_at) =
+        pull_ordered_consumer_with_lost_recreate(&server, &context, &proxy).await;
+
+    let second = within!(Duration::from_secs(12), messages.next())
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.payload.as_ref(), b"second");
+    assert!(
+        deleted_at.elapsed() >= Duration::from_secs(7),
+        "recreate retried after {:?}, before the context timeout",
+        deleted_at.elapsed()
+    );
+}
+
+// With neither a context timeout nor a connection request timeout, nothing the user can set
+// bounds the recreate, so it falls back to 10 seconds instead of waiting forever for a lost
+// create.
+#[tokio::test]
+async fn ordered_recreate_falls_back_to_ten_seconds_without_any_timeout() {
+    let (server, client, context) = setup().await;
+    let proxy = proxy(client, Duration::ZERO).await;
+    let (mut messages, deleted_at) =
+        pull_ordered_consumer_with_lost_recreate(&server, &context, &proxy).await;
+
+    let second = within!(Duration::from_secs(15), messages.next())
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.payload.as_ref(), b"second");
+    assert!(
+        deleted_at.elapsed() >= Duration::from_secs(10),
+        "recreate retried after {:?}, before the 10 second floor",
+        deleted_at.elapsed()
+    );
+}
+
+// The push ordered consumer's recreate waits for the full context timeout too, also above 5
+// seconds. A second consumer delivering to the same subject redelivers `first` with consumer
+// sequence 1, a gap the ordered consumer recreates on at once; a server-side delete would
+// only be noticed after two missed 5 second heartbeats.
+#[tokio::test]
+async fn push_ordered_recreate_honors_a_context_timeout_above_five_seconds() {
+    let (server, client, mut context) = setup().await;
+    let proxy = proxy(client.clone(), Duration::ZERO).await;
+    context.set_timeout(Duration::from_secs(7));
+    let stream = context
+        .create_stream(stream::Config {
+            name: "events".to_string(),
+            subjects: vec!["events".to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    context
+        .publish("events", "first".into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    let deliver_subject = client.new_inbox();
+    let consumer = stream
+        .create_consumer(push::OrderedConfig {
+            deliver_subject: deliver_subject.clone(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut messages = consumer.messages().await.unwrap();
+    let first = messages.next().await.unwrap().unwrap();
+    assert_eq!(first.payload.as_ref(), b"first");
+
+    proxy.swallow_next_create.store(true, Ordering::SeqCst);
+    let admin = jetstream::new(async_nats::connect(server.client_url()).await.unwrap());
+    let gap_at = Instant::now();
+    admin
+        .create_consumer_on_stream(
+            push::Config {
+                deliver_subject,
+                ..Default::default()
+            },
+            "events",
+        )
+        .await
+        .unwrap();
+    // Let the ordered consumer see the gap before `second` is published.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), messages.next())
+            .await
+            .is_err()
+    );
+    admin
+        .publish("events", "second".into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let second = within!(Duration::from_secs(12), messages.next())
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.payload.as_ref(), b"second");
+    assert!(
+        gap_at.elapsed() >= Duration::from_secs(7),
+        "recreate retried after {:?}, before the context timeout",
+        gap_at.elapsed()
+    );
 }

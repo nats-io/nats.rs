@@ -674,8 +674,9 @@ impl ConnectOptions {
     /// for JetStream API requests. Default value is set to 10 seconds.
     ///
     /// `None` disables the timeout: a request whose reply is lost waits forever. On a JetStream
-    /// context without its own timeout this includes JetStream API requests. Avoid it. To wait
-    /// longer on JetStream API requests, set the JetStream context timeout instead.
+    /// context without its own timeout this includes JetStream API requests; ordered consumer
+    /// recreation then falls back to 10 seconds. Avoid it. To wait longer on JetStream API
+    /// requests, set the JetStream context timeout instead.
     ///
     /// # Examples
     /// ```no_run
