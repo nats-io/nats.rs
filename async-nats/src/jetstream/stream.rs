@@ -80,7 +80,9 @@ pub type DirectGetError = Error<DirectGetErrorKind>;
 impl From<crate::RequestError> for DirectGetError {
     fn from(err: crate::RequestError) -> Self {
         match err.kind() {
-            crate::RequestErrorKind::TimedOut => DirectGetError::new(DirectGetErrorKind::TimedOut),
+            crate::RequestErrorKind::TimedOut => {
+                DirectGetError::with_source(DirectGetErrorKind::TimedOut, err)
+            }
             crate::RequestErrorKind::NoResponders => {
                 DirectGetError::new(DirectGetErrorKind::ErrorResponse(
                     StatusCode::NO_RESPONDERS,
@@ -2699,10 +2701,13 @@ impl<T> DirectGetBuilder<T> {
             format!("{}.DIRECT.GET.{}", self.context.prefix, self.stream_name)
         };
 
+        let api_request = self
+            .context
+            .apply_timeout(crate::client::Request::new().payload(payload));
         let response = self
             .context
             .client
-            .request(request_subject, payload)
+            .send_request(request_subject, api_request)
             .await?;
 
         // Check for error status

@@ -1127,7 +1127,9 @@ impl Request {
         self
     }
 
-    /// Sets the custom timeout of the request. Overrides default [Client] timeout.
+    /// Sets the custom timeout of the request. Overrides default [Client] timeout, and the
+    /// JetStream context timeout when the request is sent with the `Requester` implementation
+    /// of a JetStream context.
     /// Setting it to [Option::None] disables the timeout entirely which might result in deadlock.
     /// To use default timeout, simply do not call this function.
     ///
