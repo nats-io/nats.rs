@@ -114,6 +114,10 @@ pub mod traits {
 /// The wait for publish acks and double acks when no context timeout was set.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The bound on background recovery requests when neither a context timeout nor a connection
+/// request timeout was set.
+const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A context which can perform jetstream scoped requests. API requests are bounded by the
 /// connection's request timeout unless a context timeout is set, see
 /// [`ContextBuilder::timeout`].
@@ -243,7 +247,8 @@ where
 {
     /// Sets the timeout for JetStream API requests, publish acks and double acks.
     ///
-    /// When set, it bounds the reply wait of every API request, regardless of the connection's
+    /// When set, it bounds the reply wait of every API request, including ordered consumer
+    /// recreation, regardless of the connection's
     /// [`ConnectOptions::request_timeout`](crate::ConnectOptions::request_timeout). When not
     /// set, API requests are bounded by the connection's request timeout, 10 seconds by default
     /// and unbounded when that was disabled with `request_timeout(None)`, and acks by
@@ -382,6 +387,17 @@ impl Context {
             request.timeout = self.timeout.map(Some);
         }
         request
+    }
+
+    /// A copy of the context for the requests of background recovery, such as ordered consumer
+    /// recreation. Nothing awaits those requests directly, so with neither a context timeout nor
+    /// a connection request timeout they fall back to 10 seconds instead of waiting forever.
+    pub(crate) fn recovery_context(&self) -> Context {
+        let mut context = self.clone();
+        if context.timeout.is_none() && context.client.timeout().is_none() {
+            context.timeout = Some(RECOVERY_TIMEOUT);
+        }
+        context
     }
 
     /// Return a clone of the underlying NATS client.

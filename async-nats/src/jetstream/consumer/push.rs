@@ -895,13 +895,12 @@ async fn recreate_consumer_and_subscription(
     consumer_name: String,
     sequence: u64,
 ) -> Result<Subscriber, ConsumerRecreateError> {
+    let context = context.recovery_context();
     trace!("delete old consumer before creating new one");
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        context.delete_consumer_from_stream(&consumer_name, &stream_name),
-    )
-    .await
-    .ok();
+    context
+        .delete_consumer_from_stream(&consumer_name, &stream_name)
+        .await
+        .ok();
 
     let delivery_subject = context.client.new_inbox();
     config.deliver_subject = delivery_subject;
@@ -933,20 +932,18 @@ async fn recreate_ephemeral_consumer(
         }
     };
 
-    let config = config.clone();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        context.create_consumer_on_stream(
+    context
+        .create_consumer_on_stream(
             jetstream::consumer::push::OrderedConfig {
                 deliver_policy,
                 ..config
             },
-            stream_name.clone(),
-        ),
-    )
-    .await
-    .map_err(|_| ConsumerRecreateError::new(ConsumerRecreateErrorKind::TimedOut))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+            stream_name,
+        )
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
+        })?;
 
     Ok(())
 }

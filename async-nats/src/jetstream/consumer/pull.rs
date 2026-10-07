@@ -2872,14 +2872,13 @@ async fn recreate_consumer_stream(
     );
     let _span_handle = span.enter();
     let config = config.to_owned();
+    let context = context.recovery_context();
     trace!("delete old consumer before creating new one");
 
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        context.delete_consumer_from_stream(consumer_name, stream_name),
-    )
-    .await
-    .ok();
+    context
+        .delete_consumer_from_stream(consumer_name, stream_name)
+        .await
+        .ok();
 
     let deliver_policy = {
         if sequence == 0 {
@@ -2891,19 +2890,18 @@ async fn recreate_consumer_stream(
         }
     };
     trace!("create the new ordered consumer for sequence {}", sequence);
-    let consumer = tokio::time::timeout(
-        Duration::from_secs(5),
-        context.create_consumer_on_stream(
+    let consumer = context
+        .create_consumer_on_stream(
             jetstream::consumer::pull::OrderedConfig {
                 deliver_policy,
                 ..config.clone()
             },
             stream_name,
-        ),
-    )
-    .await
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::TimedOut, err))?
-    .map_err(|err| ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err))?;
+        )
+        .await
+        .map_err(|err| {
+            ConsumerRecreateError::with_source(ConsumerRecreateErrorKind::Recreate, err)
+        })?;
 
     let batch_config = ordered_batch_config(&consumer.info);
     let config = Consumer {
