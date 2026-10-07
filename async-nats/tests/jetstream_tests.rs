@@ -398,6 +398,48 @@ mod jetstream {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn create_stream_subject_overlap_error_includes_config() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        context
+            .create_stream(stream::Config {
+                name: "orders".into(),
+                subjects: vec!["orders.*".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let err = match context
+            .create_stream(stream::Config {
+                name: "shipments".into(),
+                subjects: vec!["orders.new".into()],
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(_) => panic!("expected overlapping stream subjects to fail"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        assert!(
+            message.contains("shipments"),
+            "error did not include stream name: {message}"
+        );
+        assert!(
+            message.contains("orders.new"),
+            "error did not include stream subjects: {message}"
+        );
+        assert!(
+            message.contains("subjects overlap with an existing stream"),
+            "error did not include server response: {message}"
+        );
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn create_stream_with_replicas() {
