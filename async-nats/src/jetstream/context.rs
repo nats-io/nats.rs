@@ -103,17 +103,26 @@ pub mod traits {
         fn client(&self) -> crate::Client;
     }
 
+    /// Provides the context timeout, see
+    /// [`ContextBuilder::timeout`](super::ContextBuilder::timeout).
     pub trait TimeoutProvider {
+        /// Returns the context timeout, or 5 seconds when none was set.
         fn timeout(&self) -> Duration;
     }
 }
 
-/// A context which can perform jetstream scoped requests.
+/// The wait for publish acks and double acks when no context timeout was set.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A context which can perform jetstream scoped requests. API requests are bounded by the
+/// connection's request timeout unless a context timeout is set, see
+/// [`ContextBuilder::timeout`].
 #[derive(Debug, Clone)]
 pub struct Context {
     pub(crate) client: Client,
     pub(crate) prefix: String,
-    pub(crate) timeout: Duration,
+    /// The timeout set with `ContextBuilder::timeout` or `set_timeout`, if any.
+    pub(crate) timeout: Option<Duration>,
     pub(crate) max_ack_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) ack_sender:
         tokio::sync::mpsc::Sender<(oneshot::Receiver<Message>, OwnedSemaphorePermit)>,
@@ -159,7 +168,9 @@ impl ToAssign for No {}
 /// # async fn main() -> Result<(), async_nats::Error> {
 /// let client = async_nats::connect("demo.nats.io").await?;
 /// let context = ContextBuilder::new()
-///     .timeout(Duration::from_secs(5))
+///     // Bounds API requests and publish acks; unset, API requests follow the connection's
+///     // request timeout and acks wait 5 seconds.
+///     .timeout(Duration::from_secs(30))
 ///     .api_prefix("MY.JS.API")
 ///     .max_ack_inflight(1000)
 ///     .build(client);
@@ -168,7 +179,7 @@ impl ToAssign for No {}
 /// ```
 pub struct ContextBuilder<PREFIX: ToAssign> {
     prefix: String,
-    timeout: Duration,
+    timeout: Option<Duration>,
     semaphore_capacity: usize,
     ack_timeout: Duration,
     backpressure_on_inflight: bool,
@@ -180,7 +191,7 @@ impl Default for ContextBuilder<Yes> {
     fn default() -> Self {
         ContextBuilder {
             prefix: "$JS.API".to_string(),
-            timeout: Duration::from_secs(5),
+            timeout: None,
             semaphore_capacity: 5_000,
             ack_timeout: Duration::from_secs(30),
             backpressure_on_inflight: true,
@@ -230,14 +241,22 @@ impl<PREFIX> ContextBuilder<PREFIX>
 where
     PREFIX: ToAssign,
 {
-    /// Set the timeout for all JetStream API requests.
+    /// Sets the timeout for JetStream API requests, publish acks and double acks.
+    ///
+    /// When set, it bounds the reply wait of every API request, regardless of the connection's
+    /// [`ConnectOptions::request_timeout`](crate::ConnectOptions::request_timeout). When not
+    /// set, API requests are bounded by the connection's request timeout, 10 seconds by default
+    /// and unbounded when that was disabled with `request_timeout(None)`, and acks by
+    /// 5 seconds. Pull requests are bounded by their own `expires` instead. A
+    /// [`Request::timeout`](crate::Request::timeout) on a raw request sent with the
+    /// [`Requester`](crate::client::traits::Requester) implementation replaces it.
     pub fn timeout(self, timeout: Duration) -> ContextBuilder<Yes>
     where
         Yes: ToAssign,
     {
         ContextBuilder {
             prefix: self.prefix,
-            timeout,
+            timeout: Some(timeout),
             semaphore_capacity: self.semaphore_capacity,
             ack_timeout: self.ack_timeout,
             backpressure_on_inflight: self.backpressure_on_inflight,
@@ -246,8 +265,9 @@ where
         }
     }
 
-    /// Sets the maximum time client waits for acks from the server when default backpressure is
-    /// used.
+    /// Sets the maximum time the background ack handler waits for the ack of a publish whose
+    /// [`PublishAckFuture`] was dropped without being awaited. Defaults to 30 seconds. Awaited
+    /// acks use [`ContextBuilder::timeout`].
     pub fn ack_timeout(self, ack_timeout: Duration) -> ContextBuilder<Yes>
     where
         Yes: ToAssign,
@@ -341,9 +361,27 @@ impl Context {
         ContextBuilder::default().build(client)
     }
 
-    /// Sets the timeout for all JetStream API requests.
+    /// Sets the timeout for JetStream API requests, publish acks and double acks, for this
+    /// context and the handles created from it afterwards. See [`ContextBuilder::timeout`].
     pub fn set_timeout(&mut self, timeout: Duration) {
-        self.timeout = timeout
+        self.timeout = Some(timeout);
+    }
+
+    /// The context timeout, or its default: the wait for publish acks and double acks.
+    pub(crate) fn timeout_or_default(&self) -> Duration {
+        self.timeout.unwrap_or(DEFAULT_TIMEOUT)
+    }
+
+    /// Bounds `request` by the context timeout unless it sets its own. With neither, the
+    /// connection's request timeout applies.
+    pub(crate) fn apply_timeout(
+        &self,
+        mut request: crate::client::Request,
+    ) -> crate::client::Request {
+        if request.timeout.is_none() {
+            request.timeout = self.timeout.map(Some);
+        }
+        request
     }
 
     /// Return a clone of the underlying NATS client.
@@ -537,12 +575,13 @@ impl Context {
             })
             .map_err(|err| PublishError::with_source(PublishErrorKind::Other, err));
 
-        tokio::time::timeout(self.timeout, send_fut)
+        let timeout = self.timeout_or_default();
+        tokio::time::timeout(timeout, send_fut)
             .map_err(|_elapsed| PublishError::new(PublishErrorKind::TimedOut))
             .await??;
 
         Ok(PublishAckFuture {
-            timeout: self.timeout,
+            timeout,
             subscription: Some(receiver),
             permit: Some(permit),
             tx: self.ack_sender.clone(),
@@ -1534,6 +1573,8 @@ impl Context {
     ///
     /// This is a low level API used mostly internally, that should be used only in
     /// specific cases when this crate API on [Consumer] or [Stream] does not provide needed functionality.
+    /// The request is bounded by the context timeout when one was set, otherwise by the
+    /// connection's request timeout, see [`ContextBuilder::timeout`].
     ///
     /// # Examples
     ///
@@ -1556,17 +1597,17 @@ impl Context {
         V: DeserializeOwned,
     {
         let subject = subject.to_subject();
-        let request = serde_json::to_vec(&payload)
+        let body = serde_json::to_vec(&payload)
             .map(Bytes::from)
             .map_err(|err| RequestError::with_source(RequestErrorKind::Other, err))?;
 
-        debug!("JetStream request sent: {:?}", request);
+        debug!("JetStream request sent: {:?}", body);
 
+        let request = self.apply_timeout(crate::client::Request::new().payload(body));
         let message = self
             .client
-            .request(format!("{}.{}", self.prefix, subject.as_ref()), request)
-            .await;
-        let message = message?;
+            .send_request(format!("{}.{}", self.prefix, subject.as_ref()), request)
+            .await?;
         debug!(
             "JetStream request response: {:?}",
             from_utf8(&message.payload)
@@ -1740,12 +1781,18 @@ impl Context {
 }
 
 impl crate::client::traits::Requester for Context {
+    /// Sends a raw request, with the subject as is, without the API prefix. It is bounded by the
+    /// context timeout when one was set, otherwise by the connection's request timeout, see
+    /// [`ContextBuilder::timeout`]. A timeout set with
+    /// [`Request::timeout`](crate::Request::timeout) replaces both, including `None`, which
+    /// leaves the request unbounded.
     fn send_request<S: ToSubject>(
         &self,
         subject: S,
         request: crate::Request,
     ) -> impl Future<Output = Result<Message, crate::RequestError>> {
-        self.client.send_request(subject, request)
+        self.client
+            .send_request(subject, self.apply_timeout(request))
     }
 }
 
@@ -1794,7 +1841,7 @@ impl traits::Requester for Context {
 
 impl traits::TimeoutProvider for Context {
     fn timeout(&self) -> Duration {
-        self.timeout
+        self.timeout_or_default()
     }
 }
 

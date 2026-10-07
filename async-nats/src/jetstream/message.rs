@@ -376,7 +376,7 @@ impl Message {
                 .client
                 .publish_with_reply(reply.clone(), inbox, ack_kind.into())
                 .await?;
-            match tokio::time::timeout(self.context.timeout, subscription.next())
+            match tokio::time::timeout(self.context.timeout_or_default(), subscription.next())
                 .await
                 .map_err(|_| {
                     std::io::Error::new(
@@ -706,7 +706,7 @@ impl Acker {
                 .client
                 .publish_with_reply(reply.to_owned(), inbox, ack_kind.into())
                 .await?;
-            match tokio::time::timeout(self.context.timeout, subscription.next())
+            match tokio::time::timeout(self.context.timeout_or_default(), subscription.next())
                 .await
                 .map_err(|_| {
                     std::io::Error::new(

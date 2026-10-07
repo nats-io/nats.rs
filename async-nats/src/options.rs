@@ -670,7 +670,12 @@ impl ConnectOptions {
         self
     }
 
-    /// Sets a timeout for `Client::request`. Default value is set to 10 seconds.
+    /// Sets the timeout for `Client::request` and, when no JetStream context timeout is set,
+    /// for JetStream API requests. Default value is set to 10 seconds.
+    ///
+    /// `None` disables the timeout: a request whose reply is lost waits forever. On a JetStream
+    /// context without its own timeout this includes JetStream API requests. Avoid it. To wait
+    /// longer on JetStream API requests, set the JetStream context timeout instead.
     ///
     /// # Examples
     /// ```no_run
