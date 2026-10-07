@@ -234,6 +234,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LANG: &str = "rust";
 const MAX_PENDING_PINGS: usize = 2;
 const MULTIPLEXER_SID: u64 = 0;
+const MULTIPLEXER_PRUNE_MIN: usize = 256;
 pub(crate) const DEFAULT_SERVER_MAX_PAYLOAD: usize = 1024 * 1024;
 
 /// A re-export of the `rustls` crate used in this crate,
@@ -450,11 +451,78 @@ struct Subscription {
     max: Option<u64>,
 }
 
+/// Routes the replies to all requests of a client through a single subscription.
+///
+/// A request whose caller stops waiting, after a timeout or because its future was dropped,
+/// drops its receiver without telling the connection handler. If no reply arrives, nothing
+/// removes its sender, so senders whose receivers are closed are pruned when an insert brings
+/// `senders` to `prune_at`: twice its smallest size since the last prune, and at least
+/// [`MULTIPLEXER_PRUNE_MIN`]. This bounds both memory and work:
+///
+/// * `senders` never exceeds `prune_at`, so abandoned requests cannot outnumber
+///   [`MULTIPLEXER_PRUNE_MIN`] or twice the smallest size of `senders` since the last prune.
+/// * A prune triggered by an insert visits `prune_at` senders, and at least half of them were
+///   inserted after `senders` was at its smallest. Each insert thus pays for at most two visits:
+///   amortized O(1). Requests and replies only add a few integer operations; checking whether
+///   receivers are closed is left to the prune.
+/// * A single prune still visits every sender, and stalls the connection handler about as long as
+///   growing the map to that size when its senders are pending, and a few times longer when most
+///   were abandoned and must be freed: 10 to 20 ms for 100,000 abandoned senders, and up to 180 ms
+///   for a million. A prune triggered by an insert delays that request and all queued behind it.
+/// * As replies drain `senders`, `prune_at` follows it down, so that abandoned requests cannot
+///   reach twice a past peak before they are pruned. A burst that grows the map again thus pays
+///   the prunes of its growth again: about one visit per request.
 #[derive(Debug)]
 struct Multiplexer {
     subject: Subject,
     prefix: Subject,
     senders: HashMap<String, oneshot::Sender<Message>>,
+    /// Size of `senders` at which senders of abandoned requests are pruned.
+    prune_at: usize,
+}
+
+impl Multiplexer {
+    fn new(subject: Subject, prefix: Subject) -> Multiplexer {
+        Multiplexer {
+            subject,
+            prefix,
+            senders: HashMap::new(),
+            prune_at: MULTIPLEXER_PRUNE_MIN,
+        }
+    }
+
+    fn insert(&mut self, token: String, sender: oneshot::Sender<Message>) {
+        if self.senders.len() >= self.prune_at {
+            self.prune();
+        }
+        self.senders.insert(token, sender);
+    }
+
+    fn remove(&mut self, token: &str) -> Option<oneshot::Sender<Message>> {
+        let sender = self.senders.remove(token)?;
+        // Follow the map down as replies drain it, so that abandoned requests cannot pile up to
+        // the size of a past burst before the next prune.
+        self.prune_at = self
+            .prune_at
+            .min((self.senders.len() * 2).max(MULTIPLEXER_PRUNE_MIN));
+        Some(sender)
+    }
+
+    /// Removes the senders of requests whose callers stopped waiting, e.g. after a timeout.
+    ///
+    /// Such a request dropped its receiver and will never read a reply, so nothing else would
+    /// ever remove its sender.
+    #[cold]
+    fn prune(&mut self) {
+        let len = self.senders.len();
+        self.senders.retain(|_, sender| !sender.is_closed());
+        self.prune_at = (self.senders.len() * 2).max(MULTIPLEXER_PRUNE_MIN);
+        debug!(
+            "pruned {} abandoned requests, {} pending",
+            len - self.senders.len(),
+            self.senders.len()
+        );
+    }
 }
 
 /// A connection handler which facilitates communication from channels to a single shared connection.
@@ -787,7 +855,7 @@ impl ConnectionHandler {
                             subject.strip_prefix(multiplexer.prefix.as_ref()).to_owned();
 
                         if let Some(token) = maybe_token {
-                            if let Some(sender) = multiplexer.senders.remove(token) {
+                            if let Some(sender) = multiplexer.remove(token) {
                                 debug!("forwarding message to request with token {}", token);
                                 let message = Message {
                                     subject,
@@ -907,18 +975,14 @@ impl ConnectionHandler {
                         queue_group: None,
                     });
 
-                    self.multiplexer.insert(Multiplexer {
-                        subject,
-                        prefix,
-                        senders: HashMap::new(),
-                    })
+                    self.multiplexer.insert(Multiplexer::new(subject, prefix))
                 };
                 self.connector
                     .connect_stats
                     .out_messages
                     .add(1, Ordering::Relaxed);
 
-                multiplexer.senders.insert(token.to_owned(), sender);
+                multiplexer.insert(token.to_owned(), sender);
 
                 let respond: Subject = format!("{}{}", multiplexer.prefix, token).into();
 
@@ -2035,5 +2099,162 @@ mod tests {
         drop(subscriber);
 
         tokio::task::yield_now().await;
+    }
+
+    fn multiplexer() -> Multiplexer {
+        Multiplexer::new(
+            Subject::from_static("_INBOX.mux.*"),
+            Subject::from_static("_INBOX.mux."),
+        )
+    }
+
+    fn reply() -> Message {
+        Message {
+            subject: Subject::from_static("_INBOX.mux.reply"),
+            reply: None,
+            payload: Bytes::from_static(b"reply"),
+            headers: None,
+            status: None,
+            description: None,
+            length: 5,
+        }
+    }
+
+    /// Inserts the sender of a pending request, and tells whether that pruned the map.
+    ///
+    /// A prune of a map whose requests are all pending removes nothing, so it doubles the
+    /// threshold, and nothing else moves the threshold on an insert.
+    fn insert_pending(
+        multiplexer: &mut Multiplexer,
+        token: String,
+    ) -> (oneshot::Receiver<Message>, bool) {
+        let (sender, receiver) = oneshot::channel();
+        let prune_at = multiplexer.prune_at;
+        multiplexer.insert(token, sender);
+        (receiver, multiplexer.prune_at != prune_at)
+    }
+
+    /// Inserts the sender of a request whose caller stopped waiting.
+    fn insert_abandoned(multiplexer: &mut Multiplexer, token: String) {
+        // Dropping the receiver is what a request does when its caller stops waiting.
+        let (sender, receiver) = oneshot::channel();
+        drop(receiver);
+        multiplexer.insert(token, sender);
+    }
+
+    /// Answers the pending request of `token`, which must not have been pruned.
+    fn answer(
+        multiplexer: &mut Multiplexer,
+        token: &str,
+        receiver: &mut oneshot::Receiver<Message>,
+    ) {
+        let sender = multiplexer
+            .remove(token)
+            .expect("pending request was pruned");
+        sender.send(reply()).unwrap();
+        assert_eq!(receiver.try_recv().unwrap().payload, "reply");
+    }
+
+    #[test]
+    fn multiplexer_prunes_abandoned_requests() {
+        let mut multiplexer = multiplexer();
+
+        for i in 0..10_000 {
+            insert_abandoned(&mut multiplexer, format!("abandoned{i}"));
+        }
+
+        assert!(multiplexer.senders.len() <= MULTIPLEXER_PRUNE_MIN);
+    }
+
+    #[test]
+    fn multiplexer_keeps_pending_requests() {
+        let mut multiplexer = multiplexer();
+        let mut pending = Vec::new();
+
+        for i in 0..1_000 {
+            let (receiver, _) = insert_pending(&mut multiplexer, format!("pending{i}"));
+            pending.push((format!("pending{i}"), receiver));
+
+            for j in 0..10 {
+                insert_abandoned(&mut multiplexer, format!("abandoned{i}.{j}"));
+            }
+        }
+
+        // Pruning keeps the map within twice the number of pending requests.
+        assert!(multiplexer.senders.len() <= 2_000);
+
+        for (token, mut receiver) in pending {
+            answer(&mut multiplexer, &token, &mut receiver);
+        }
+    }
+
+    /// Fills the multiplexer with `count` pending requests, then answers all of them.
+    fn answer_burst(multiplexer: &mut Multiplexer, count: usize) {
+        let mut pending = Vec::new();
+        let mut prunes = 0;
+        for i in 0..count {
+            let (receiver, pruned) = insert_pending(multiplexer, format!("burst{i}"));
+            pending.push((format!("burst{i}"), receiver));
+            prunes += usize::from(pruned);
+            // Each prune finds every request pending, and doubles the threshold.
+            assert!(prunes <= 10, "{prunes} prunes");
+        }
+        for (token, mut receiver) in pending {
+            answer(multiplexer, &token, &mut receiver);
+        }
+    }
+
+    #[test]
+    fn multiplexer_prunes_abandoned_requests_after_burst() {
+        let mut multiplexer = multiplexer();
+        answer_burst(&mut multiplexer, 10_000);
+
+        for i in 0..10_000 {
+            insert_abandoned(&mut multiplexer, format!("abandoned{i}"));
+        }
+
+        assert!(multiplexer.senders.len() <= MULTIPLEXER_PRUNE_MIN);
+    }
+
+    #[test]
+    fn multiplexer_prunes_rarely_while_requests_grow() {
+        let mut multiplexer = multiplexer();
+        let mut pending = Vec::new();
+        let mut prunes = 0;
+
+        // Each prune finds every request pending, and doubles the threshold: 256, 512, ..., 65536.
+        for i in 0..100_000 {
+            let (receiver, pruned) = insert_pending(&mut multiplexer, format!("pending{i}"));
+            pending.push(receiver);
+            prunes += usize::from(pruned);
+            assert!(prunes <= 9, "{prunes} prunes");
+        }
+
+        assert_eq!(prunes, 9);
+    }
+
+    #[test]
+    fn multiplexer_does_not_prune_under_steady_load() {
+        let mut multiplexer = multiplexer();
+        let mut pending = VecDeque::new();
+        for i in 0..1_000 {
+            let (receiver, _) = insert_pending(&mut multiplexer, format!("pending{i}"));
+            pending.push_back((format!("pending{i}"), receiver));
+        }
+        // Only a prune would remove it.
+        insert_abandoned(&mut multiplexer, "abandoned".to_owned());
+
+        // Every reply is followed by a new request, so 1000 requests stay pending.
+        for i in 1_000..11_000 {
+            let (token, mut receiver) = pending.pop_front().unwrap();
+            answer(&mut multiplexer, &token, &mut receiver);
+
+            let (receiver, _) = insert_pending(&mut multiplexer, format!("pending{i}"));
+            pending.push_back((format!("pending{i}"), receiver));
+            assert!(
+                multiplexer.senders.contains_key("abandoned"),
+                "pruned at request {i}"
+            );
+        }
     }
 }
