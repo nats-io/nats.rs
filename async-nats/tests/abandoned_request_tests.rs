@@ -19,7 +19,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -60,14 +60,20 @@ unsafe impl GlobalAlloc for CountingAllocator {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 const SUBJECT: &str = "service";
-/// Abandoned requests per run. Each one left in the multiplexer holds about 300 bytes, so
-/// keeping all of them would grow the heap by about 6 MiB.
+/// Requests abandoned to warm up the client, its buffers and the server before measuring.
+const WARMUP: usize = 1_000;
+/// Requests abandoned while measuring. Each one left in the multiplexer holds about 300 bytes,
+/// so keeping all of them would grow the heap by about 6 MiB.
 const ABANDONED: usize = 20_000;
 const BATCH: usize = 500;
 const WAIT: Duration = Duration::from_millis(10);
 const MAX_GROWTH: isize = 1024 * 1024;
 /// How long the client gets to free the abandoned requests.
 const SETTLE: Duration = Duration::from_secs(5);
+/// Timeout of requests abandoned all at once.
+const BURST_WAIT: Duration = Duration::from_secs(1);
+/// Ping interval of a client that must free abandoned requests on its timer within [`SETTLE`].
+const PING_INTERVAL: Duration = Duration::from_millis(200);
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
@@ -75,8 +81,7 @@ static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 /// that the heap does not grow by more than [`MAX_GROWTH`] once the client caught up.
 ///
 /// `abandon` sends `count` requests through the client and returns once their callers stopped
-/// waiting. It runs twice: once to warm up the client, its buffers and the server, and once
-/// measured.
+/// waiting. It first runs with [`WARMUP`] requests, then measured with [`ABANDONED`].
 fn assert_abandoned_requests_are_freed<F, Fut>(options: ConnectOptions, abandon: F)
 where
     F: Fn(Client, usize) -> Fut,
@@ -108,9 +113,9 @@ where
         client.flush().await.unwrap();
 
         let start = HEAP_BYTES.load(Ordering::Relaxed);
-        abandon(client.clone(), ABANDONED).await;
+        abandon(client.clone(), WARMUP).await;
         wait_until("warm-up requests are received", || {
-            received.load(Ordering::Relaxed) >= ABANDONED
+            received.load(Ordering::Relaxed) >= WARMUP
         })
         .await;
         settle(&client, start).await;
@@ -118,10 +123,11 @@ where
 
         abandon(client.clone(), ABANDONED).await;
         wait_until("abandoned requests are received", || {
-            received.load(Ordering::Relaxed) >= 2 * ABANDONED
+            received.load(Ordering::Relaxed) >= WARMUP + ABANDONED
         })
         .await;
         let growth = settle(&client, before).await;
+        println!("heap grew by {growth} bytes");
         assert!(
             growth < MAX_GROWTH,
             "heap grew by {growth} bytes, {} per abandoned request",
@@ -226,5 +232,53 @@ fn dropped_publish_acks_are_freed() {
             drop(context.publish(SUBJECT, "data".into()).await.unwrap());
         })
         .await;
+    });
+}
+
+/// Sends `count` requests at once and waits until all of them time out, so that the client holds
+/// all of them at the same time, and no request follows that could prune them.
+async fn abandon_at_once(client: &Client, count: usize) {
+    let requests =
+        (0..count).map(|_| client.send_request(SUBJECT, Request::new().timeout(Some(BURST_WAIT))));
+    for result in futures::future::join_all(requests).await {
+        assert_eq!(result.unwrap_err().kind(), RequestErrorKind::TimedOut);
+    }
+}
+
+#[test]
+fn abandoned_burst_is_freed_without_further_requests() {
+    let options = ConnectOptions::new().ping_interval(PING_INTERVAL);
+    assert_abandoned_requests_are_freed(options, |client, count| async move {
+        abandon_at_once(&client, count).await;
+    });
+}
+
+#[test]
+fn abandoned_burst_is_freed_while_replies_arrive() {
+    let options = ConnectOptions::new().ping_interval(PING_INTERVAL);
+    let echoing = AtomicBool::new(false);
+    assert_abandoned_requests_are_freed(options, |client, count| {
+        let echoing = &echoing;
+        async move {
+            abandon_at_once(&client, count).await;
+
+            // Requests answered one at a time never bring the client to its prune threshold,
+            // and every reply resets its ping timer.
+            if !echoing.swap(true, Ordering::Relaxed) {
+                let mut echo = client.subscribe("echo").await.unwrap();
+                tokio::spawn({
+                    let client = client.clone();
+                    async move {
+                        while let Some(request) = echo.next().await {
+                            let reply = request.reply.unwrap();
+                            client.publish(reply, request.payload).await.unwrap();
+                        }
+                    }
+                });
+                tokio::spawn(
+                    async move { while client.request("echo", "".into()).await.is_ok() {} },
+                );
+            }
+        }
     });
 }
