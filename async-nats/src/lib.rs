@@ -458,7 +458,7 @@ struct Subscription {
 /// removes its sender, so senders whose receivers are closed are pruned when an insert brings
 /// `senders` to `prune_at`: twice its smallest size since the last prune, and at least
 /// [`MULTIPLEXER_PRUNE_MIN`]. The connection handler also prunes once per ping interval, see
-/// [`ConnectionHandler::poll_prune`]. This bounds both memory and work:
+/// [`ConnectionHandler::poll_prune`], and on reconnect. This bounds both memory and work:
 ///
 /// * An abandoned request is freed within a ping interval. Before that, `senders` never exceeds
 ///   `prune_at`, so abandoned requests cannot outnumber [`MULTIPLEXER_PRUNE_MIN`] or twice the
@@ -1130,7 +1130,9 @@ impl ConnectionHandler {
             }
         }
 
-        if let Some(multiplexer) = &self.multiplexer {
+        if let Some(multiplexer) = self.multiplexer.as_mut() {
+            // No prune ran while reconnecting, so requests may have been abandoned meanwhile.
+            multiplexer.prune_and_shrink();
             self.connection.enqueue_write_op(&ClientOp::Subscribe {
                 sid: MULTIPLEXER_SID,
                 subject: multiplexer.subject.to_owned(),

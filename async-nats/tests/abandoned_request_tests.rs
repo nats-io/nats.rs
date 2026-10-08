@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use async_nats::{Client, ConnectOptions, Request, RequestErrorKind};
+use async_nats::{Client, ConnectOptions, Event, Request, RequestErrorKind};
 use futures::StreamExt;
 
 struct CountingAllocator;
@@ -279,6 +279,32 @@ fn abandoned_burst_is_freed_while_replies_arrive() {
                     async move { while client.request("echo", "".into()).await.is_ok() {} },
                 );
             }
+        }
+    });
+}
+
+#[test]
+fn abandoned_requests_are_freed_on_reconnect() {
+    let (events_tx, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    let options = ConnectOptions::new()
+        // Long enough for the timer not to prune during the test.
+        .ping_interval(Duration::from_secs(3600))
+        .event_callback(move |event| {
+            let events_tx = events_tx.clone();
+            async move {
+                events_tx.send(event).ok();
+            }
+        });
+    assert_abandoned_requests_are_freed(options, |client, count| {
+        let events = &events;
+        async move {
+            abandon_at_once(&client, count).await;
+
+            client.force_reconnect().await.unwrap();
+            let mut events = events.lock().await;
+            while events.recv().await != Some(Event::Disconnected) {}
+            while events.recv().await != Some(Event::Connected) {}
         }
     });
 }
