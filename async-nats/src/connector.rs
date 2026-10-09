@@ -47,7 +47,9 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use std::borrow::Cow;
 use std::cmp;
+use std::collections::HashMap;
 use std::fmt;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -178,6 +180,10 @@ pub(crate) struct Connector {
     pub(crate) max_payload: Arc<AtomicUsize>,
     /// Last known server info, updated after each successful connection.
     last_info: ServerInfo,
+    /// TLS names to verify discovered IP servers against, keyed by address.
+    /// Holds the DNS name of the server through which the IP was discovered,
+    /// so that the certificate check is not downgraded to the bare IP.
+    tls_names: HashMap<ServerAddr, String>,
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -303,6 +309,7 @@ impl Connector {
             max_payload,
             connect_stats,
             last_info: ServerInfo::default(),
+            tls_names: HashMap::new(),
         })
     }
 
@@ -372,6 +379,9 @@ impl Connector {
             })
             .collect();
         self.servers = new_servers;
+        let servers = &self.servers;
+        self.tls_names
+            .retain(|addr, _| servers.iter().any(|s| &s.addr == addr));
         self.attempts = 0;
         Ok(())
     }
@@ -612,11 +622,12 @@ impl Connector {
         }))
     }
 
-    /// Runs the TLS handshake on `stream` and verifies the server certificate.
+    /// Runs the TLS handshake on `stream` and verifies the server certificate against
+    /// `tls_name`.
     async fn tls_handshake<S>(
         &self,
         stream: S,
-        server_addr: &ServerAddr,
+        tls_name: &str,
     ) -> Result<tokio_rustls::client::TlsStream<S>, ConnectError>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -629,7 +640,7 @@ impl Connector {
         );
         let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-        let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
+        let domain = crate::rustls::pki_types::ServerName::try_from(tls_name)
             .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
         Ok(tls_connector.connect(domain.to_owned(), stream).await?)
@@ -668,7 +679,7 @@ impl Connector {
             #[cfg(feature = "websockets")]
             "ws" | "wss" => {
                 let stream: Box<dyn AsyncReadWrite> = if server_addr.scheme() == "wss" {
-                    Box::new(self.tls_handshake(tcp_stream, &server_addr).await?)
+                    Box::new(self.tls_handshake(tcp_stream, server_addr.host()).await?)
                 } else {
                     Box::new(tcp_stream)
                 };
@@ -691,8 +702,16 @@ impl Connector {
             ),
         };
 
+        // Discovered IP servers are verified against the DNS name of the
+        // server they were discovered through rather than the bare IP.
+        let tls_name = self
+            .tls_names
+            .get(&server_addr)
+            .cloned()
+            .unwrap_or_else(|| server_addr.host().to_string());
+
         let tls_connection = |connection: Connection| async {
-            let tls_stream = self.tls_handshake(connection.stream, &server_addr).await?;
+            let tls_stream = self.tls_handshake(connection.stream, &tls_name).await?;
 
             Ok::<Connection, ConnectError>(Connection::new(
                 Box::new(tls_stream),
@@ -775,6 +794,12 @@ impl Connector {
                         discovered_url = %url,
                         "adding discovered server"
                     );
+                    if discovered_addr.host().parse::<IpAddr>().is_ok()
+                        && tls_name.parse::<IpAddr>().is_err()
+                    {
+                        self.tls_names
+                            .insert(discovered_addr.clone(), tls_name.clone());
+                    }
                     self.servers.push(Server::new_discovered(discovered_addr));
                 }
             }
