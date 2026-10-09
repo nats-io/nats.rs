@@ -42,8 +42,10 @@ use base64::engine::Engine;
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::cmp;
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -168,6 +170,10 @@ pub(crate) struct Connector {
     pub(crate) max_payload: Arc<AtomicUsize>,
     /// Last known server info, updated after each successful connection.
     last_info: ServerInfo,
+    /// TLS names to verify discovered IP servers against, keyed by address.
+    /// Holds the DNS name of the server through which the IP was discovered,
+    /// so that the certificate check is not downgraded to the bare IP.
+    tls_names: HashMap<ServerAddr, String>,
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -200,6 +206,7 @@ impl Connector {
             max_payload,
             connect_stats,
             last_info: ServerInfo::default(),
+            tls_names: HashMap::new(),
         })
     }
 
@@ -237,6 +244,9 @@ impl Connector {
             })
             .collect();
         self.servers = new_servers;
+        let servers = &self.servers;
+        self.tls_names
+            .retain(|addr, _| servers.iter().any(|s| &s.addr == addr));
         self.attempts = 0;
         Ok(())
     }
@@ -538,6 +548,14 @@ impl Connector {
             }
         };
 
+        // Discovered IP servers are verified against the DNS name of the
+        // server they were discovered through rather than the bare IP.
+        let tls_name = self
+            .tls_names
+            .get(&server_addr)
+            .cloned()
+            .unwrap_or_else(|| server_addr.host().to_string());
+
         let tls_connection = |connection: Connection| async {
             tracing::debug!("upgrading connection to TLS");
             let tls_config = Arc::new(
@@ -547,7 +565,7 @@ impl Connector {
             );
             let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-            let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
+            let domain = crate::rustls::pki_types::ServerName::try_from(tls_name.as_str())
                 .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
 
             let tls_stream = tls_connector
@@ -613,6 +631,12 @@ impl Connector {
                         discovered_url = %url,
                         "adding discovered server"
                     );
+                    if discovered_addr.host().parse::<IpAddr>().is_ok()
+                        && tls_name.parse::<IpAddr>().is_err()
+                    {
+                        self.tls_names
+                            .insert(discovered_addr.clone(), tls_name.clone());
+                    }
                     self.servers.push(Server::new_discovered(discovered_addr));
                 }
             }

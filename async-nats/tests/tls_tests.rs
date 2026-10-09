@@ -198,4 +198,66 @@ mod client {
 
         assert!(client.server_info().tls_required);
     }
+
+    #[tokio::test]
+    async fn discovered_ip_servers_keep_tls_name() {
+        // Servers advertise 127.0.0.1, while the certificate is only valid
+        // for localhost, so discovered servers have to be verified against
+        // the name the client was originally given.
+        let mut cluster = nats_server::run_cluster("tests/configs/tls_cluster.conf");
+        let seed_port = cluster.servers[0].client_port();
+
+        let (reconnect_tx, mut reconnect_rx) = tokio::sync::mpsc::channel(8);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let client = async_nats::ConnectOptions::new()
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .require_tls(true)
+            .event_callback(move |event| {
+                let reconnect_tx = reconnect_tx.clone();
+                async move {
+                    if let async_nats::Event::Connected = event {
+                        reconnect_tx.send(()).await.ok();
+                    }
+                }
+            })
+            .connect(format!("tls://localhost:{seed_port}"))
+            .await
+            .unwrap();
+        reconnect_rx.recv().await.unwrap();
+
+        let pool = client.server_pool().await.unwrap();
+        let discovered: Vec<_> = pool.iter().filter(|s| s.is_discovered).collect();
+        assert!(!discovered.is_empty(), "no servers discovered: {pool:?}");
+        assert!(
+            discovered.iter().all(|s| s.addr.host() == "127.0.0.1"),
+            "expected only IP servers to be discovered: {pool:?}"
+        );
+
+        // Stop the seed server, leaving only servers reachable by IP.
+        drop(cluster.servers.remove(0));
+
+        tokio::time::timeout(Duration::from_secs(10), reconnect_rx.recv())
+            .await
+            .expect("did not reconnect to a discovered server")
+            .unwrap();
+        assert_ne!(client.server_info().port, seed_port);
+        assert!(client.server_info().tls_required);
+
+        let mut sub = client.subscribe("foo").await.unwrap();
+        client.publish("foo", "data".into()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), sub.next())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // The name check is not skipped: an IP the certificate does not
+        // cover is still rejected when dialed directly.
+        let port = client.server_info().port;
+        async_nats::ConnectOptions::new()
+            .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+            .require_tls(true)
+            .connect(format!("tls://127.0.0.1:{port}"))
+            .await
+            .unwrap_err();
+    }
 }
