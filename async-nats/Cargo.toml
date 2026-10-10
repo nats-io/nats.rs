@@ -42,7 +42,10 @@ ring = { version = "0.17", optional = true }
 rand = "0.10.1"
 rustls-webpki = { package = "rustls-webpki", default-features = false, version = "0.103.10" }
 portable-atomic = "1"
-tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-webpki-roots"], optional = true }
+# async-nats always hands tokio-websockets its own rustls connector for `wss://` (see
+# `Connector::Rustls` in connector.rs), so no root store is needed here. `sha1_smol` computes the
+# RFC 6455 handshake digest, so no crypto provider feature has to be forwarded to this crate.
+tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-bring-your-own-connector", "sha1_smol"], optional = true }
 pin-project = "1.0"
 
 [dev-dependencies]
@@ -77,8 +80,8 @@ service = ["dep:time", "dep:serde_nanos"]
 chrono = ["dep:chrono"]
 crypto = []
 websockets = ["dep:tokio-websockets"]
-aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
-ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets?/ring"]
+aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+ring = ["dep:ring", "tokio-rustls/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
 nkeys = ["dep:nkeys", "dep:base64"]
 # Use NUID for generating unique IDs (inbox subjects, object store nonces).
