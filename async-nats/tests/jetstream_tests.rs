@@ -4630,6 +4630,39 @@ mod jetstream {
 
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
+    async fn consumer_priority_timeout() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let stream = jetstream
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events.>".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut consumer = stream
+            .create_consumer(pull::Config {
+                durable_name: Some("name".to_string()),
+                priority_policy: PriorityPolicy::PinnedClient,
+                priority_groups: vec!["A".to_string()],
+                priority_timeout: Duration::from_secs(1),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            consumer.info().await.unwrap().config.priority_timeout,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
     async fn pause_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::ConnectOptions::new()

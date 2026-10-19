@@ -665,6 +665,8 @@ impl From<OrderedConfig> for Config {
             #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
             #[cfg(feature = "server_2_11")]
+            priority_timeout: Duration::ZERO,
+            #[cfg(feature = "server_2_11")]
             pause_until: None,
         }
     }
@@ -734,6 +736,8 @@ impl IntoConsumerConfig for OrderedConfig {
             priority_policy: PriorityPolicy::None,
             #[cfg(feature = "server_2_11")]
             priority_groups: Vec::new(),
+            #[cfg(feature = "server_2_11")]
+            priority_timeout: Duration::ZERO,
             #[cfg(feature = "server_2_11")]
             pause_until: None,
         }
@@ -2633,6 +2637,12 @@ pub struct Config {
     #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
+    /// How long a client stays pinned without pulling, for [PriorityPolicy::PinnedClient].
+    /// Zero leaves it to the server, which defaults to 2 minutes.
+    #[cfg(feature = "server_2_11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub priority_timeout: Duration,
     /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
     #[serde(
@@ -2686,6 +2696,8 @@ impl IntoConsumerConfig for Config {
             #[cfg(feature = "server_2_11")]
             priority_groups: self.priority_groups,
             #[cfg(feature = "server_2_11")]
+            priority_timeout: self.priority_timeout,
+            #[cfg(feature = "server_2_11")]
             pause_until: self.pause_until,
         }
     }
@@ -2727,6 +2739,8 @@ impl FromConsumer for Config {
             priority_policy: config.priority_policy,
             #[cfg(feature = "server_2_11")]
             priority_groups: config.priority_groups,
+            #[cfg(feature = "server_2_11")]
+            priority_timeout: config.priority_timeout,
             #[cfg(feature = "server_2_11")]
             pause_until: config.pause_until,
         })
