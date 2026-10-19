@@ -1026,8 +1026,8 @@ impl<I> Stream<I> {
     /// [`PriorityPolicy::PinnedClient`][crate::jetstream::consumer::PriorityPolicy::PinnedClient]
     /// [Consumer], so the server pins another client pulling from it.
     ///
-    /// The server keeps one pin per consumer and releases it whichever of the consumer's
-    /// priority groups `group` names; `group` must be one of them.
+    /// The server keeps one pin per consumer, so naming any of the consumer's priority groups
+    /// releases it; `group` must name one of them.
     ///
     /// # Examples
     ///

@@ -273,12 +273,12 @@ pub struct PriorityGroupState {
     /// The `Nats-Pin-Id` of the pinned client, or `None` while no client is pinned.
     pub pinned_client_id: Option<String>,
     /// When the client was pinned, or `None` while no client is pinned.
-    #[serde(default, deserialize_with = "deserialize_pinned_ts")]
+    #[serde(default, deserialize_with = "deserialize_go_zero_time_as_none")]
     pub pinned_ts: Option<DateTime>,
 }
 
 #[cfg(feature = "server_2_11")]
-fn deserialize_pinned_ts<'de, D>(deserializer: D) -> Result<Option<DateTime>, D::Error>
+fn deserialize_go_zero_time_as_none<'de, D>(deserializer: D) -> Result<Option<DateTime>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

@@ -62,7 +62,7 @@ async fn fetch_from_group(consumer: &PullConsumer) -> Vec<jetstream::Message> {
 }
 
 #[tokio::test]
-async fn pinned_client_info() {
+async fn info_reports_the_pin_id_of_the_pinned_client() {
     let (_server, js, stream) = setup().await;
     let mut consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     js.publish("events", "data".into())
@@ -87,8 +87,9 @@ async fn pinned_client_info() {
     );
 }
 
+#[cfg(feature = "server_2_12")]
 #[tokio::test]
-async fn unpin_releases_pinned_client() {
+async fn unpin_consumer_releases_the_pinned_client() {
     let (_server, js, stream) = setup().await;
     let mut consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     js.publish("events", "data".into())
@@ -105,7 +106,7 @@ async fn unpin_releases_pinned_client() {
 }
 
 #[tokio::test]
-async fn unpin_missing_consumer() {
+async fn unpin_consumer_fails_for_a_missing_consumer() {
     let (_server, _js, stream) = setup().await;
 
     let err = stream.unpin_consumer("missing", "A").await.unwrap_err();
@@ -117,7 +118,7 @@ async fn unpin_missing_consumer() {
 }
 
 #[tokio::test]
-async fn unpin_invalid_consumer_name() {
+async fn unpin_consumer_rejects_an_invalid_consumer_name() {
     let (_server, _js, stream) = setup().await;
 
     let err = stream.unpin_consumer("pinned.>", "A").await.unwrap_err();
@@ -147,7 +148,7 @@ fn priority_group_state_parses_pinned_ts() {
 }
 
 #[test]
-fn priority_timeout_zero_is_omitted() {
+fn priority_timeout_is_omitted_when_zero() {
     let config = serde_json::to_value(pull::Config::default()).unwrap();
 
     assert!(config.get("priority_timeout").is_none());
