@@ -476,9 +476,21 @@ pub struct Config {
 pub enum PriorityPolicy {
     #[serde(rename = "overflow")]
     Overflow,
-    /// This feature is not yet supported by the client.
-    /// It's part of the enum to ensure that the client can deserialize
-    /// Consumer configurations that used [PriorityPolicy::PinnedClient].
+    /// The server pins one pull client per priority group and delivers messages only to it;
+    /// other clients pulling the same group wait on standby. The pin moves to a standby client
+    /// when the pinned one stops pulling for [Config::priority_timeout], or when
+    /// [`unpin_consumer`][crate::jetstream::stream::Stream::unpin_consumer] is called.
+    ///
+    /// Pull with `messages()` or `stream()` and a group set through `group(..)`. Each pull stream
+    /// is its own client and keeps the pin it receives. Keep the pull expiry well below
+    /// [Config::priority_timeout], or the pin is lost between pulls. A new pull stream starts on
+    /// standby until the pin of a previous one expires or is released.
+    ///
+    /// `fetch()`, `batch()` and `sequence()` return [`BatchErrorKind::PinnedClient`] for this
+    /// policy: a one-shot pull could take a pin it never renews and keep every other client on
+    /// standby until [Config::priority_timeout].
+    ///
+    /// [`BatchErrorKind::PinnedClient`]: crate::jetstream::consumer::pull::BatchErrorKind::PinnedClient
     #[serde(rename = "pinned_client")]
     PinnedClient,
     #[cfg(feature = "server_2_12")]
