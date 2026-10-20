@@ -635,6 +635,8 @@ standard_headers! {
     /// will reject the message (and the enclosing batch, if any) when its own
     /// level is below the value set here.
     (NatsRequiredApiLevel, NATS_REQUIRED_API_LEVEL, b"Nats-Required-Api-Level");
+    /// Id of the pull client a pinned client priority consumer delivers to.
+    (NatsPinId, NATS_PIN_ID, b"Nats-Pin-Id");
 }
 
 /// Value constant for [`NATS_BATCH_COMMIT`]: commit and store the final message.
