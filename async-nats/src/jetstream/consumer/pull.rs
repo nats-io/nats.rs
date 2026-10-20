@@ -1286,7 +1286,7 @@ impl futures_util::Stream for Stream {
                             // We got an message from a stream.
                             StatusCode::OK => {
                                 trace!("message received");
-                                // The server appends its own pin after any stored in the message.
+                                // A published `Nats-Pin-Id` can precede the server's.
                                 #[cfg(feature = "server_2_11")]
                                 if let (Some(pin_id), Some(id)) = (
                                     &self.pin_id,
