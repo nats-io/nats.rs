@@ -40,7 +40,8 @@ This file lists the dependencies used in this repository.
 | idna_adapter 1.2.2 | Apache-2.0 OR MIT |
 | jsonschema 0.46.5 | MIT |
 | ref-cast 1.0.25 | Apache-2.0 OR MIT |
-| reqwest 0.13.3 | Apache-2.0 OR MIT |
+| reqwest 0.13.5 | Apache-2.0 OR MIT |
+| security-framework-sys 2.15.0 (macOS) | Apache-2.0 OR MIT |
 | serde_json 1.0.145 | Apache-2.0 OR MIT |
 | tracing-subscriber 0.3.17 | MIT |
 | writeable 0.6.3 | Unicode-3.0 |

@@ -58,7 +58,7 @@ futures = { version = "0.3.28", default-features = false, features = ["std", "as
 tracing-subscriber = "0.3"
 async-nats = {path = ".", features = ["service", "server_2_10"], default-features = false}
 # Keep HTTP test traffic independent of the NATS rustls provider under test.
-reqwest = { version = "0.13.3", features = ["native-tls"], default-features = false }
+reqwest = { version = "0.13.5", features = ["native-tls"], default-features = false }
 jsonschema = { version = "0.46.5", default-features = false }
 chrono = "0.4.44"
 
@@ -73,6 +73,10 @@ idna_adapter = "1.2.2"
 writeable = "0.6.3"
 # jsonschema's canonical formatter requires CompactFormatter: Default.
 serde_json = "1.0.145"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# rustls-native-certs 0.8.0 needs SecTrustEvaluateWithError in its older wrapper.
+security-framework-sys = { version = "2.15.0", default-features = false, features = ["OSX_10_13"] }
 
 [features]
 default = ["server_2_10", "server_2_11", "server_2_12", "server_2_14", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
