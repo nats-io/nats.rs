@@ -653,4 +653,33 @@ mod service {
         assert_eq!(err.kind(), PublishErrorKind::InvalidSubject);
         assert!(err.source().is_some());
     }
+
+    #[tokio::test]
+    async fn verbs_missing_reply_subject() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let _service = client
+            .service_builder()
+            .start("service", "1.0.0")
+            .await
+            .unwrap();
+
+        // publish without reply
+        for verb in ["PING", "INFO", "STATS"] {
+            client
+                .publish(format!("$SRV.{verb}"), "".into())
+                .await
+                .unwrap();
+        }
+        client.flush().await.unwrap();
+
+        // the service still answers every verb
+        for verb in ["PING", "INFO", "STATS"] {
+            client
+                .request(format!("$SRV.{verb}"), "".into())
+                .await
+                .unwrap();
+        }
+    }
 }
