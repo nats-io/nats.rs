@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nats.io/schemas/micro/v1/info_response.json",
+  "description": "A response from the NATS Micro $SRV.INFO API",
+  "title": "io.nats.micro.v1.info_response",
+  "type": "object",
+  "required": [
+    "type",
+    "name",
+    "id",
+    "version",
+    "description"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "io.nats.micro.v1.info_response"
+    },
+    "name": {
+      "description": "The kind of the service. Shared by all the services that have the same name",
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1
+    },
+    "id": {
+      "description": "A unique ID for this instance of a service",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "The version of the service",
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "minLength": 5
+    },
+    "metadata": {
+      "oneOf": [
+        {
+          "description": "Additional metadata for the service",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "description": {
+      "description": "The description of the service supplied as configuration while creating the service",
+      "type": "string"
+    },
+    "endpoints": {
+      "type": "array",
+      "description": "List of declared endpoints",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "subject"
+        ],
+        "description": "Information about an endpoint",
+        "properties": {
+          "name": {
+            "description": "The endopoint name",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "minLength": 1
+          },
+          "subject": {
+            "description": "The subject the endpoint listens on",
+            "type": "string",
+            "minLength": 1
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "description": "Additional metadata for the service",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue_group": {
+            "description": "The queue group this endpoint listens on for requests",
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

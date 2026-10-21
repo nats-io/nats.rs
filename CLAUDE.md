@@ -83,8 +83,8 @@ bash .cargo-hack-check.sh
 # Build docs
 cargo doc --no-deps --all-features
 
-# Check MSRV (1.88.0)
-cargo +1.88.0 check
+# Check MSRV (1.89.0)
+cargo +1.89.0 check
 
 # Check licenses
 cargo deny check licenses
@@ -105,7 +105,7 @@ All of these must pass before a PR is merged:
 | Clippy | `cargo clippy --benches --tests --examples --all-features -- --deny clippy::all` |
 | Tests | `cargo test --features slow_tests,websockets` |
 | Docs | `cargo doc --no-deps --all-features` |
-| MSRV | Build with Rust 1.88.0 |
+| MSRV | Build with Rust 1.89.0 |
 | Licenses | `cargo deny check licenses` |
 | Spelling | `cargo spellcheck --code 1` |
 | Examples | `cargo check --examples` |
@@ -324,7 +324,7 @@ assert_eq!(err.kind(), PublishErrorKind::BadSubject);
 
 ### Dependencies
 - New dependencies must have licenses allowed in `deny.toml`: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause.
-- Consider MSRV (1.88.0) when adding dependencies.
+- Consider MSRV (1.89.0) when adding dependencies.
 - Feature-gate optional dependencies with `dep:` syntax: `dep:time`, `dep:serde_nanos`.
 
 ### Docs

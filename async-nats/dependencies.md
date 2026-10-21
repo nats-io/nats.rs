@@ -21,6 +21,8 @@ This file lists the dependencies used in this repository.
 | serde_json 1.0.107        | Apache-2.0 OR MIT        |
 | serde_nanos 0.1.3         | Apache-2.0 OR MIT        |
 | serde_repr 0.1.16         | Apache-2.0 OR MIT        |
+| sha1_smol (optional)      | BSD-3-Clause             |
+| simdutf8 (optional)       | Apache-2.0 OR MIT        |
 | thiserror 1.0.48          | Apache-2.0 OR MIT        |
 | time 0.3.29               | Apache-2.0 OR MIT        |
 | tokio 1.32.0              | MIT                      |
@@ -28,12 +30,17 @@ This file lists the dependencies used in this repository.
 | tokio-rustls 0.24.1       | Apache-2.0 OR MIT        |
 | tracing 0.1.37            | MIT                      |
 | url 2.4.1                 | Apache-2.0 OR MIT        |
-| webpki-roots (optional)   | CDLA-Permissive-2.0      |
 
 ## Dev dependencies (tests, examples, benchmarks)
 
 | name            | license           |
 | --------------- | ----------------- |
 | criterion 0.5.1 | Apache-2.0 OR MIT |
-| reqwest 0.11.20 | Apache-2.0 OR MIT |
+| idna 1.1.0 | Apache-2.0 OR MIT |
+| idna_adapter 1.2.2 | Apache-2.0 OR MIT |
+| jsonschema 0.46.5 | MIT |
+| ref-cast 1.0.25 | Apache-2.0 OR MIT |
+| reqwest 0.13.3 | Apache-2.0 OR MIT |
+| serde_json 1.0.145 | Apache-2.0 OR MIT |
 | tracing-subscriber 0.3.17 | MIT |
+| writeable 0.6.3 | Unicode-3.0 |

@@ -3,7 +3,7 @@ name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
 version = "0.50.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 description = "A async Rust NATS client"
 license = "Apache-2.0"
 documentation = "https://docs.rs/async-nats"
@@ -42,7 +42,10 @@ ring = { version = "0.17", optional = true }
 rand = "0.10.1"
 rustls-webpki = { package = "rustls-webpki", default-features = false, version = "0.103.10" }
 portable-atomic = "1"
-tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-webpki-roots"], optional = true }
+# NATS supplies its own TLS connector; the WebSocket handshake only needs SHA-1.
+tokio-websockets = { version = "0.13.3", default-features = false, features = ["client", "rand", "rustls-bring-your-own-connector", "sha1_smol"], optional = true }
+# Older versions allowed by tokio-websockets require nightly for AArch64 SIMD.
+simdutf8 = { version = "0.1.5", default-features = false, optional = true }
 pin-project = "1.0"
 
 [dev-dependencies]
@@ -54,12 +57,22 @@ tokio = { version = "1.25.0", features = ["rt-multi-thread"] }
 futures = { version = "0.3.28", default-features = false, features = ["std", "async-await"] }
 tracing-subscriber = "0.3"
 async-nats = {path = ".", features = ["service", "server_2_10"], default-features = false}
-reqwest = "0.11.18"
-jsonschema = "0.17.1"
+# Keep HTTP test traffic independent of the NATS rustls provider under test.
+reqwest = { version = "0.13.3", features = ["native-tls"], default-features = false }
+jsonschema = { version = "0.46.5", default-features = false }
 chrono = "0.4.44"
 
 # for -Z minimal-versions
 num = "0.4.1"
+# fluent-uri uses the custom-cast API through jsonschema's referencing crate.
+ref-cast = "1.0.25"
+# Keep jsonschema's IDNA graph on one compatible ICU generation.
+idna = "1.1.0"
+idna_adapter = "1.2.2"
+# ICU's display macro requires the newer conditional implementation syntax.
+writeable = "0.6.3"
+# jsonschema's canonical formatter requires CompactFormatter: Default.
+serde_json = "1.0.145"
 
 [features]
 default = ["server_2_10", "server_2_11", "server_2_12", "server_2_14", "service", "ring", "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
@@ -76,9 +89,9 @@ service = ["dep:time", "dep:serde_nanos"]
 # than rebinding this one.
 chrono = ["dep:chrono"]
 crypto = []
-websockets = ["dep:tokio-websockets"]
-aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "tokio-websockets?/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
-ring = ["dep:ring", "tokio-rustls/ring", "tokio-websockets?/ring"]
+websockets = ["dep:tokio-websockets", "dep:simdutf8"]
+aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
+ring = ["dep:ring", "tokio-rustls/ring"]
 fips = ["aws-lc-rs", "tokio-rustls/fips"]
 nkeys = ["dep:nkeys", "dep:base64"]
 # Use NUID for generating unique IDs (inbox subjects, object store nonces).

@@ -16,7 +16,7 @@ mod service {
     use async_nats::client::PublishErrorKind;
     use async_nats::service::{self, Info, ServiceExt, Stats};
     use futures_util::StreamExt;
-    use jsonschema::JSONSchema;
+    use jsonschema::Validator;
     use std::error::Error;
     use std::fmt::Display;
     use std::{collections::HashMap, str::from_utf8};
@@ -538,11 +538,15 @@ mod service {
         let _endpoint = service.endpoint("products").await.unwrap();
         let group = service.group("v1");
         group.endpoint("productsv2").await.unwrap();
-        validate(&client, "ping").await;
-        validate(&client, "stats").await;
-        validate(&client, "info").await;
+        for (endpoint, schema) in [
+            ("ping", include_str!("configs/schemas/ping_response.json")),
+            ("stats", include_str!("configs/schemas/stats_response.json")),
+            ("info", include_str!("configs/schemas/info_response.json")),
+        ] {
+            validate(&client, endpoint, schema).await;
+        }
 
-        async fn validate(client: &async_nats::Client, endpoint: &str) {
+        async fn validate(client: &async_nats::Client, endpoint: &str, schema: &str) {
             let data: serde_json::Value = serde_json::from_slice(
                 &client
                     .request(format!("$SRV.{}", endpoint.to_uppercase()), "".into())
@@ -551,25 +555,12 @@ mod service {
                     .payload,
             )
             .unwrap();
-            let schema = reqwest::get(schema_url(endpoint))
-                .await
+            let schema = serde_json::from_str(schema).unwrap();
+
+            Validator::new(&schema)
                 .unwrap()
-                .json()
-                .await
-                .unwrap();
-
-            match JSONSchema::compile(&schema).unwrap().validate(&data) {
-                Ok(_) => (),
-                Err(mut errs) => {
-                    if let Some(err) = errs.next() {
-                        panic!("schema {endpoint} validation error: {err}")
-                    }
-                }
-            };
-        }
-
-        fn schema_url(url: &str) -> String {
-            format!("https://raw.githubusercontent.com/nats-io/jsm.go/main/schemas/micro/v1/{url}_response.json")
+                .validate(&data)
+                .unwrap_or_else(|err| panic!("schema {endpoint} validation error: {err}"));
         }
     }
 

@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nats.io/schemas/micro/v1/ping_response.json",
+  "description": "A response from the NATS Micro $SRV.PING API",
+  "title": "io.nats.micro.v1.ping_response",
+  "type": "object",
+  "required": [
+    "type",
+    "name",
+    "id",
+    "version"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "io.nats.micro.v1.ping_response"
+    },
+    "name": {
+      "description": "The kind of the service. Shared by all the services that have the same name",
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1
+    },
+    "id": {
+      "description": "A unique ID for this instance of a service",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "The version of the service",
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "minLength": 5
+    },
+    "metadata": {
+      "oneOf": [
+        {
+          "description": "Additional metadata for the service",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

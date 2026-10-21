@@ -139,7 +139,32 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test tls --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
+          tls_features=jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }}
+          cargo test --test tls_tests --no-default-features --features "$tls_features" -- --nocapture
+          cargo test --test client_tests tls --no-default-features --features "$tls_features" -- --nocapture
+          cargo test --test websocket_test --no-default-features --features "$tls_features" -- --nocapture
+          cargo test --test service_tests service::schemas --no-default-features --features "$tls_features" -- --nocapture
+      - name: Check lockfile without WebSockets
+        shell: bash
+        run: |
+          consumer_dir=$(mktemp -d)
+          trap 'rm -rf "$consumer_dir"' EXIT
+          mkdir "$consumer_dir/src"
+          touch "$consumer_dir/src/lib.rs"
+          cat > "$consumer_dir/Cargo.toml" <<EOF
+          [package]
+          name = "async-nats-dependency-check"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          async-nats = { path = "$GITHUB_WORKSPACE/async-nats", default-features = false, features = ["jetstream", "${{ matrix.tls_feature }}"] }
+          EOF
+          cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
+          if grep -E '^name = "(tokio-websockets|webpki-roots|sha1_smol|simdutf8)"$' "$consumer_dir/Cargo.lock"; then
+            echo "WebSocket dependencies must not be locked when WebSockets are disabled" >&2
+            exit 1
+          fi
 
   server_2_11_tests:
     defaults:
@@ -300,7 +325,7 @@ jobs:
 
       - name: Install msrv Rust on ubuntu-latest
         id:   install-rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache the build artifacts
         uses: Swatinem/rust-cache@v2
         with:
