@@ -44,7 +44,7 @@ rustls-webpki = { package = "rustls-webpki", default-features = false, version =
 portable-atomic = "1"
 # async-nats always hands tokio-websockets its own rustls connector for `wss://` (see
 # `Connector::Rustls` in connector.rs), so no root store is needed here. `sha1_smol` computes the
-# RFC 6455 handshake digest, so no crypto provider feature has to be forwarded to this crate.
+# RFC 6455 handshake digest; under `fips` aws-lc computes it instead (see the `fips` feature).
 tokio-websockets = { version = "0.10", default-features = false, features = ["client", "rand", "rustls-bring-your-own-connector", "sha1_smol"], optional = true }
 pin-project = "1.0"
 
@@ -82,7 +82,9 @@ crypto = []
 websockets = ["dep:tokio-websockets"]
 aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
 ring = ["dep:ring", "tokio-rustls/ring"]
-fips = ["aws-lc-rs", "tokio-rustls/fips"]
+# Forward `aws_lc_rs` so the websocket handshake SHA-1 stays in the aws-lc FIPS module;
+# tokio-websockets prefers it over `sha1_smol`. Weak, so nothing is built without `websockets`.
+fips = ["aws-lc-rs", "tokio-rustls/fips", "tokio-websockets?/aws_lc_rs"]
 nkeys = ["dep:nkeys", "dep:base64"]
 # Use NUID for generating unique IDs (inbox subjects, object store nonces).
 # When disabled, falls back to rand-based alphanumeric ID generation.
