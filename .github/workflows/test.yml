@@ -135,6 +135,35 @@ jobs:
         with:
           shared-key: ${{ runner.os }}-${{ steps.install-rust.outputs.cachekey }}-${{ hashFiles('**/Cargo.toml') }}
           cache-on-failure: true
+      - name: Check the lockfile without websockets (${{ matrix.tls_feature }})
+        shell: bash
+        run: |
+          consumer_dir=$(mktemp -d)
+          trap 'rm -rf "$consumer_dir"' EXIT
+          mkdir "$consumer_dir/src"
+          touch "$consumer_dir/src/lib.rs"
+          # Every feature except `websockets` and the other providers, so that a weak
+          # `tokio-websockets?/...` reference added to any of them shows up here.
+          cat > "$consumer_dir/Cargo.toml" <<EOF
+          [package]
+          name = "async-nats-lockfile-check"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          async-nats = { path = "$GITHUB_WORKSPACE/async-nats", default-features = false, features = ["jetstream", "kv", "object-store", "service", "chrono", "crypto", "nkeys", "nuid", "experimental", "server_2_10", "server_2_11", "server_2_12", "server_2_14", "${{ matrix.tls_feature }}"] }
+          EOF
+          cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
+          unwanted='^name = "(tokio-websockets|webpki-roots|sha1_smol)"$'
+          # `fips` forwards a weak feature to tokio-websockets, which Cargo locks but does not build
+          # (rust-lang/cargo#10801); the CA bundle must still stay out.
+          if [ "${{ matrix.tls_feature }}" = fips ]; then
+            unwanted='^name = "webpki-roots"$'
+          fi
+          if grep -E "$unwanted" "$consumer_dir/Cargo.lock"; then
+            echo "websocket dependencies must not be locked when websockets are disabled" >&2
+            exit 1
+          fi
       - name: Run TLS test with ${{ matrix.tls_feature }}
         env:
           RUST_BACKTRACE: 1
