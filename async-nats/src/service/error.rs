@@ -28,7 +28,24 @@ impl Display for Error {
         write!(
             f,
             "service request error code: {}, status: {}",
-            self.status, self.code
+            self.code, self.status
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn display_prints_code_then_status() {
+        let err = Error {
+            status: "Testing".to_string(),
+            code: 101,
+        };
+        assert_eq!(
+            err.to_string(),
+            "service request error code: 101, status: Testing"
+        );
     }
 }
