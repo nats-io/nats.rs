@@ -17,6 +17,7 @@ pub mod pull;
 pub mod push;
 #[cfg(feature = "server_2_10")]
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::task;
 use std::time::Duration;
@@ -622,11 +623,32 @@ crate::from_with_timeout!(
     crate::jetstream::stream::ConsumerErrorKind
 );
 
-fn backoff(attempt: u32, _: &impl std::error::Error) -> Duration {
+fn backoff(attempt: u32) -> Duration {
     if attempt < 5 {
         Duration::from_millis(500 * attempt as u64)
     } else {
         Duration::from_secs(10)
+    }
+}
+
+/// Calls `f` until it succeeds, sleeping for [`backoff`] between attempts, and returns the
+/// last error once `max_retries` retries have failed.
+async fn retry<T, E, F, Fut>(max_retries: u32, mut f: F) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let mut attempt = 0;
+    loop {
+        let delay = match f().await {
+            Ok(value) => return Ok(value),
+            Err(err) if attempt == max_retries => return Err(err),
+            Err(_) => {
+                attempt += 1;
+                backoff(attempt)
+            }
+        };
+        tokio::time::sleep(delay).await;
     }
 }
 
