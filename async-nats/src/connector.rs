@@ -154,6 +154,11 @@ pub(crate) struct ConnectorOptions {
     pub(crate) max_reconnects: Option<usize>,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: Option<http::HeaderMap>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers_callback:
+        Option<CallbackArg1<(), Result<http::HeaderMap, AuthError>>>,
 }
 
 /// Maintains a list of servers and establishes connections.
@@ -483,11 +488,14 @@ impl Connector {
         let mut connection = match server_addr.scheme() {
             #[cfg(feature = "websockets")]
             "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
+                let builder = tokio_websockets::client::Builder::new()
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                let ws = self
+                    .apply_websocket_headers(builder)
+                    .await?
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
@@ -501,13 +509,18 @@ impl Connector {
                     Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
                     })?);
-                let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
+                let tls_connector = tokio_websockets::Connector::Rustls(
+                    tokio_rustls::TlsConnector::from(tls_config),
+                );
+                let builder = tokio_websockets::client::Builder::new()
+                    .connector(&tls_connector)
                     .uri(server_addr.as_url_str())
                     .map_err(|err| {
                         ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
+                    })?;
+                let ws = self
+                    .apply_websocket_headers(builder)
+                    .await?
                     .connect()
                     .await
                     .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
@@ -735,6 +748,29 @@ impl Connector {
                 ))
             }
         }
+    }
+
+    #[cfg(feature = "websockets")]
+    async fn apply_websocket_headers<'a>(
+        &self,
+        mut builder: tokio_websockets::client::Builder<'a>,
+    ) -> Result<tokio_websockets::client::Builder<'a>, ConnectError> {
+        let callback_headers = match self.options.websocket_headers_callback.as_ref() {
+            Some(cb) => Some(cb.call(()).await.map_err(|err| {
+                tracing::error!(error = %err, "websocket headers callback failed");
+                ConnectError::with_source(crate::ConnectErrorKind::Authentication, err)
+            })?),
+            None => None,
+        };
+        if let Some(headers) = callback_headers
+            .as_ref()
+            .or(self.options.websocket_headers.as_ref())
+        {
+            for (name, value) in headers.iter() {
+                builder = builder.add_header(name.clone(), value.clone());
+            }
+        }
+        Ok(builder)
     }
 }
 
