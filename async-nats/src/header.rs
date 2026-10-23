@@ -22,7 +22,7 @@
 
 use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A struct for handling NATS headers.
@@ -154,10 +154,10 @@ impl HeaderMap {
         self.inner.len()
     }
 
-    /// Serialized byte length of this header block (as [`HeaderMap::to_bytes`]
-    /// produces), computed without allocating.
+    /// Serialized byte length of this header block (as [`HeaderMap::write_to`]
+    /// writes it), computed without allocating.
     pub(crate) fn wire_len(&self) -> usize {
-        // Mirrors `to_bytes`: "NATS/1.0\r\n" + each "<key>: <value>\r\n" + "\r\n".
+        // Mirrors `write_to`: "NATS/1.0\r\n" + each "<key>: <value>\r\n" + "\r\n".
         let mut len = b"NATS/1.0\r\n".len() + b"\r\n".len();
         for (k, vs) in &self.inner {
             for v in vs.iter() {
@@ -266,19 +266,19 @@ impl HeaderMap {
         GetAll { inner }
     }
 
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = vec![];
-        buf.extend_from_slice(b"NATS/1.0\r\n");
+    /// Appends the serialized header block, [`HeaderMap::wire_len`] bytes
+    /// long, to `buf`.
+    pub(crate) fn write_to<B: BufMut>(&self, buf: &mut B) {
+        buf.put_slice(b"NATS/1.0\r\n");
         for (k, vs) in &self.inner {
             for v in vs.iter() {
-                buf.extend_from_slice(k.as_str().as_bytes());
-                buf.extend_from_slice(b": ");
-                buf.extend_from_slice(v.inner.as_bytes());
-                buf.extend_from_slice(b"\r\n");
+                buf.put_slice(k.as_str().as_bytes());
+                buf.put_slice(b": ");
+                buf.put_slice(v.inner.as_bytes());
+                buf.put_slice(b"\r\n");
             }
         }
-        buf.extend_from_slice(b"\r\n");
-        buf
+        buf.put_slice(b"\r\n");
     }
 }
 
@@ -844,6 +844,12 @@ mod tests {
     use super::{HeaderMap, HeaderName, HeaderValue, IntoHeaderName, IntoHeaderValue};
     use std::str::{from_utf8, FromStr};
 
+    fn to_bytes(headers: &HeaderMap) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(headers.wire_len());
+        headers.write_to(&mut buf);
+        buf
+    }
+
     #[test]
     fn try_from() {
         let mut headers = HeaderMap::new();
@@ -913,7 +919,7 @@ mod tests {
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
 
-        let bytes = headers.to_bytes();
+        let bytes = to_bytes(&headers);
 
         println!("bytes: {:?}", from_utf8(&bytes));
     }
@@ -924,11 +930,11 @@ mod tests {
         headers.append("Key", "value");
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
-        assert_eq!(headers.wire_len(), headers.to_bytes().len());
+        assert_eq!(headers.wire_len(), to_bytes(&headers).len());
 
         // An empty block still serializes the framing bytes.
         let empty = HeaderMap::new();
-        assert_eq!(empty.wire_len(), empty.to_bytes().len());
+        assert_eq!(empty.wire_len(), to_bytes(&empty).len());
     }
 
     #[test]
