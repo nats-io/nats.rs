@@ -180,6 +180,14 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     }
 }
 
+// The user and password in a URL stay percent-encoded; the server wants them
+// as typed, so `p%40ss` has to go out as `p@ss`.
+fn decode_userinfo(value: &str) -> String {
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -620,6 +628,22 @@ impl Connector {
 
         // Build CONNECT message with auth info.
         let tls_required = self.options.tls_required || server_addr.tls_required();
+        // Credentials in the server URL take the place of the configured user,
+        // password and token, as in nats.go and the `nats` crate: `user:pass@`
+        // is a user and password, a bare `token@` is a token.
+        let (user, pass, auth_token) = match (server_addr.username(), server_addr.password()) {
+            (Some(user), Some(pass)) => (
+                Some(decode_userinfo(user)),
+                Some(decode_userinfo(pass)),
+                None,
+            ),
+            (Some(token), None) => (None, None, Some(decode_userinfo(token))),
+            _ => (
+                self.options.auth.username.to_owned(),
+                self.options.auth.password.to_owned(),
+                self.options.auth.token.to_owned(),
+            ),
+        };
         let mut connect_info = ConnectInfo {
             tls_required,
             name: self.options.name.clone(),
@@ -628,9 +652,9 @@ impl Connector {
             lang: LANG.to_string(),
             version: VERSION.to_string(),
             protocol: Protocol::Dynamic,
-            user: self.options.auth.username.to_owned(),
-            pass: self.options.auth.password.to_owned(),
-            auth_token: self.options.auth.token.to_owned(),
+            user,
+            pass,
+            auth_token,
             user_jwt: None,
             nkey: None,
             signature: None,
