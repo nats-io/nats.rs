@@ -1022,6 +1022,48 @@ impl<I> Stream<I> {
         self.request_pause_consumer(name, None).await
     }
 
+    /// Releases the pinned client of a
+    /// [`PriorityPolicy::PinnedClient`][crate::jetstream::consumer::PriorityPolicy::PinnedClient]
+    /// [Consumer], so the server pins another client pulling from it.
+    ///
+    /// The server keeps one pin per consumer, so naming any of the consumer's priority groups
+    /// releases it; `group` must name one of them.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("localhost:4222").await?;
+    /// let jetstream = async_nats::jetstream::new(client);
+    ///
+    /// jetstream
+    ///     .get_stream("events")
+    ///     .await?
+    ///     .unpin_consumer("my_consumer", "A")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "server_2_11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+    pub async fn unpin_consumer(&self, name: &str, group: &str) -> Result<(), ConsumerError> {
+        if !is_valid_name(name) {
+            return Err(ConsumerError::new(ConsumerErrorKind::InvalidName));
+        }
+
+        let subject = format!("CONSUMER.UNPIN.{}.{}", self.name, name);
+
+        match self
+            .context
+            .request(subject, &json!({ "group": group }))
+            .await?
+        {
+            Response::Ok::<serde::de::IgnoredAny>(_) => Ok(()),
+            Response::Err { error } => Err(error.into()),
+        }
+    }
+
     #[cfg(feature = "server_2_11")]
     async fn request_pause_consumer(
         &self,

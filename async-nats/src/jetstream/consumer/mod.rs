@@ -255,6 +255,39 @@ pub struct Info {
     /// The remaining time the consumer is paused
     #[serde(default, with = "serde_nanos")]
     pub pause_remaining: Option<Duration>,
+    /// The state of each priority group, including which client is pinned for
+    /// [PriorityPolicy::PinnedClient].
+    #[cfg(feature = "server_2_11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+    #[serde(default)]
+    pub priority_groups: Vec<PriorityGroupState>,
+}
+
+/// The state of one priority group of a consumer.
+#[cfg(feature = "server_2_11")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+pub struct PriorityGroupState {
+    /// The name of the group.
+    pub group: String,
+    /// The `Nats-Pin-Id` of the pinned client, or `None` while no client is pinned.
+    pub pinned_client_id: Option<String>,
+    /// When the client was pinned, or `None` while no client is pinned.
+    #[serde(default, deserialize_with = "deserialize_go_zero_time_as_none")]
+    pub pinned_ts: Option<DateTime>,
+}
+
+#[cfg(feature = "server_2_11")]
+fn deserialize_go_zero_time_as_none<'de, D>(deserializer: D) -> Result<Option<DateTime>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<String>::deserialize(deserializer)? {
+        Some(ts) if ts != "0001-01-01T00:00:00Z" => crate::datetime::parse_rfc3339(&ts)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        _ => Ok(None),
+    }
 }
 
 /// Information about a consumer and the stream it is consuming
@@ -422,6 +455,12 @@ pub struct Config {
     #[cfg(feature = "server_2_11")]
     #[serde(default, skip_serializing_if = "is_default")]
     pub priority_groups: Vec<String>,
+    /// How long a client stays pinned without pulling, for [PriorityPolicy::PinnedClient].
+    /// Zero leaves it to the server, which defaults to 2 minutes.
+    #[cfg(feature = "server_2_11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+    #[serde(default, with = "serde_nanos", skip_serializing_if = "is_default")]
+    pub priority_timeout: Duration,
     /// For suspending the consumer until the deadline.
     #[cfg(feature = "server_2_11")]
     #[serde(
