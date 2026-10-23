@@ -456,7 +456,9 @@ impl Service {
     /// be scaled down by one instance. If it was the only running instance, it will effectively
     /// remove the service entirely.
     pub async fn stop(self) -> Result<(), Error> {
-        self.shutdown_tx.send(())?;
+        // Sending fails when no endpoint is listening, which leaves nothing to
+        // notify; the verb handler is stopped either way.
+        let _ = self.shutdown_tx.send(());
         self.handle.abort();
         Ok(())
     }
