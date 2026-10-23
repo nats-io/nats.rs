@@ -1294,7 +1294,13 @@ impl futures_util::Stream for Stream {
                                         headers.get_last(crate::header::NATS_PIN_ID)
                                     }),
                                 ) {
-                                    pin_id.send_replace(Some(id.to_string()));
+                                    pin_id.send_if_modified(|pin_id| {
+                                        if pin_id.as_deref() == Some(id.as_str()) {
+                                            return false;
+                                        }
+                                        *pin_id = Some(id.as_str().to_owned());
+                                        true
+                                    });
                                 }
                                 self.pending_messages = self.pending_messages.saturating_sub(1);
                                 self.pending_bytes =
