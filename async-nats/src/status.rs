@@ -261,6 +261,8 @@ impl StatusCode {
     pub const TIMEOUT: StatusCode = StatusCode(new_nonzero_u16(408));
     pub const NO_RESPONDERS: StatusCode = StatusCode(new_nonzero_u16(503));
     pub const REQUEST_TERMINATED: StatusCode = StatusCode(new_nonzero_u16(409));
+    /// A pull request on a pinned client consumer does not hold the current pin.
+    pub const PIN_ID_MISMATCH: StatusCode = StatusCode(new_nonzero_u16(423));
 }
 
 /// This function is needed until const Option::unwrap becomes stable.

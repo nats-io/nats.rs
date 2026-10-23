@@ -302,6 +302,10 @@ impl Consumer<Config> {
     /// # }
     /// ```
     pub fn sequence(&self, batch: usize) -> Result<Sequence, BatchError> {
+        #[cfg(feature = "server_2_11")]
+        if self.config.priority_policy == PriorityPolicy::PinnedClient {
+            return Err(BatchError::new(BatchErrorKind::PinnedClient));
+        }
         let context = self.context.clone();
         let subject = format!(
             "{}.CONSUMER.MSG.NEXT.{}.{}",
@@ -336,6 +340,10 @@ pub struct Batch {
 
 impl Batch {
     async fn batch(batch: BatchConfig, consumer: &Consumer<Config>) -> Result<Batch, BatchError> {
+        #[cfg(feature = "server_2_11")]
+        if consumer.config.priority_policy == PriorityPolicy::PinnedClient {
+            return Err(BatchError::new(BatchErrorKind::PinnedClient));
+        }
         let inbox = Subject::from(consumer.context.client.new_inbox());
         let subscription = consumer.context.client.subscribe(inbox.clone()).await?;
         consumer.request_batch(batch.clone(), inbox.clone()).await?;
@@ -903,6 +911,10 @@ pub struct Stream {
     terminated: bool,
     heartbeat_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
     started: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Set only for [PriorityPolicy::PinnedClient] consumers, so a `Nats-Pin-Id` header stored
+    /// in a message of any other consumer is never sent back.
+    #[cfg(feature = "server_2_11")]
+    pin_id: Option<tokio::sync::watch::Sender<Option<String>>>,
 }
 
 impl Drop for Stream {
@@ -937,6 +949,8 @@ impl Stream {
         let (request_result_tx, request_result_rx) = tokio::sync::mpsc::channel(1);
         let (request_tx, mut request_rx) = tokio::sync::watch::channel(());
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        #[cfg(feature = "server_2_11")]
+        let (pin_id_tx, pin_id_rx) = tokio::sync::watch::channel(None);
         let task_handle = tokio::task::spawn({
             let batch = batch_config.clone();
             let consumer = consumer.clone();
@@ -993,7 +1007,13 @@ impl Stream {
                             debug!("expired pull request")},
                     }
 
-                    let request = serde_json::to_vec(&batch).map(Bytes::from).unwrap();
+                    let request = serde_json::to_vec(&PullRequest {
+                        batch: &batch,
+                        #[cfg(feature = "server_2_11")]
+                        pin_id: pin_id_rx.borrow().clone(),
+                    })
+                    .map(Bytes::from)
+                    .unwrap();
                     let result = context
                         .client
                         .publish_with_reply(subject.clone(), inbox.clone(), request.clone())
@@ -1025,6 +1045,9 @@ impl Stream {
             terminated: false,
             heartbeat_timeout: None,
             started: Some(started_tx),
+            #[cfg(feature = "server_2_11")]
+            pin_id: (consumer.config.priority_policy == PriorityPolicy::PinnedClient)
+                .then_some(pin_id_tx),
         })
     }
 }
@@ -1186,8 +1209,16 @@ impl futures_util::Stream for Stream {
                     self.heartbeat_timeout = None;
                     match maybe_message {
                         Some(message) => match message.status.unwrap_or(StatusCode::OK) {
-                            StatusCode::TIMEOUT | StatusCode::REQUEST_TERMINATED => {
+                            StatusCode::TIMEOUT
+                            | StatusCode::REQUEST_TERMINATED
+                            | StatusCode::PIN_ID_MISMATCH => {
                                 debug!("received status message: {:?}", message);
+                                #[cfg(feature = "server_2_11")]
+                                if let (Some(StatusCode::PIN_ID_MISMATCH), Some(pin_id)) =
+                                    (message.status, &self.pin_id)
+                                {
+                                    pin_id.send_replace(None);
+                                }
                                 // If consumer has been deleted, error and shutdown the iterator.
                                 if message.description.as_deref() == Some("Consumer Deleted") {
                                     self.terminate();
@@ -1255,6 +1286,22 @@ impl futures_util::Stream for Stream {
                             // We got an message from a stream.
                             StatusCode::OK => {
                                 trace!("message received");
+                                // A published `Nats-Pin-Id` can precede the server's.
+                                #[cfg(feature = "server_2_11")]
+                                if let (Some(pin_id), Some(id)) = (
+                                    &self.pin_id,
+                                    message.headers.as_ref().and_then(|headers| {
+                                        headers.get_last(crate::header::NATS_PIN_ID)
+                                    }),
+                                ) {
+                                    pin_id.send_if_modified(|pin_id| {
+                                        if pin_id.as_deref() == Some(id.as_str()) {
+                                            return false;
+                                        }
+                                        *pin_id = Some(id.as_str().to_owned());
+                                        true
+                                    });
+                                }
                                 self.pending_messages = self.pending_messages.saturating_sub(1);
                                 self.pending_bytes =
                                     self.pending_bytes.saturating_sub(message.length);
@@ -2530,6 +2577,15 @@ pub struct BatchConfig {
     pub priority: Option<usize>,
 }
 
+#[derive(Serialize)]
+struct PullRequest<'a> {
+    #[serde(flatten)]
+    batch: &'a BatchConfig,
+    #[cfg(feature = "server_2_11")]
+    #[serde(rename = "id", skip_serializing_if = "Option::is_none")]
+    pin_id: Option<String>,
+}
+
 fn is_default<T: Default + Eq>(t: &T) -> bool {
     t == &T::default()
 }
@@ -2772,6 +2828,10 @@ pub enum BatchErrorKind {
     Pull,
     Flush,
     Serialize,
+    /// The consumer uses [PriorityPolicy::PinnedClient], which only pull streams support.
+    #[cfg(feature = "server_2_11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server_2_11")))]
+    PinnedClient,
 }
 
 impl std::fmt::Display for BatchErrorKind {
@@ -2781,6 +2841,8 @@ impl std::fmt::Display for BatchErrorKind {
             Self::Flush => write!(f, "flush failed"),
             Self::Serialize => write!(f, "serialize failed"),
             Self::Subscribe => write!(f, "subscribe failed"),
+            #[cfg(feature = "server_2_11")]
+            Self::PinnedClient => write!(f, "pinned client consumers need a pull stream"),
         }
     }
 }
