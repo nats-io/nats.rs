@@ -157,7 +157,10 @@ impl Connection {
         }
 
         if self.read_buf.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.read_buf[5..len])
+            // `len` is at least 4 here because the `-ERR` prefix matched, so this slice is
+            // always in bounds, even for a bare `-ERR\r\n` with no description.
+            let description = str::from_utf8(&self.read_buf[4..len])
+                .map(|description| description.trim_start_matches(' '))
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
@@ -213,8 +216,15 @@ impl Connection {
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
             // Return early without advancing if there is not enough data read the entire
-            // message
-            if len + payload_len + 4 > self.read_buf.remaining() {
+            // message. The length comes from the server, so guard the addition against
+            // overflow instead of trusting it.
+            let needed = len
+                .checked_add(payload_len)
+                .and_then(|needed| needed.checked_add(4))
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "MSG payload length too large")
+                })?;
+            if needed > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -322,7 +332,13 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.read_buf.remaining() {
+            let needed = len
+                .checked_add(total_len)
+                .and_then(|needed| needed.checked_add(4))
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "HMSG total length too large")
+                })?;
+            if needed > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -963,6 +979,91 @@ mod read_op {
                 "something went wrong".into()
             )))
         );
+    }
+
+    #[tokio::test]
+    async fn error_without_description() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        // A bare `-ERR` line used to panic with an out-of-bounds slice.
+        server.write_all(b"-ERR\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(result, Some(ServerOp::Error(ServerError::Other("".into()))));
+
+        // The parser must still be in sync with the stream afterwards.
+        server.write_all(b"PING\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(result, Some(ServerOp::Ping));
+    }
+
+    #[tokio::test]
+    async fn error_description_whitespace() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        // Extra separator spaces are dropped so quoted descriptions still classify.
+        server
+            .write_all(b"-ERR   'Authorization Violation'\r\n")
+            .await
+            .unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Error(ServerError::AuthorizationViolation))
+        );
+
+        server.write_all(b"-ERR  problem\r\n").await.unwrap();
+        let result = connection.read_op().await.unwrap();
+        assert_eq!(
+            result,
+            Some(ServerOp::Error(ServerError::Other("problem".into())))
+        );
+    }
+
+    /// Feeds a single control line straight into the parser so that a regression to
+    /// "wait for more data" fails the test instead of hanging it.
+    fn try_read_line(line: &str) -> Result<Option<ServerOp>, io::Error> {
+        use bytes::BufMut;
+
+        let (stream, _server) = io::duplex(16);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+        connection.read_buf.put_slice(line.as_bytes());
+        connection.try_read_op()
+    }
+
+    #[test]
+    fn message_length_overflow() {
+        // Lengths that overflow the buffer arithmetic must be rejected as errors rather than
+        // panicking (debug) or waiting for data that never arrives (release).
+        let max = usize::MAX;
+        for line in [
+            // Overflows on the first addition.
+            format!("MSG FOO.BAR 9 {max}\r\n"),
+            // `len + payload_len` fits; only the trailing `+ 4` overflows.
+            format!(
+                "MSG FOO.BAR 9 {}\r\n",
+                max - "MSG FOO.BAR 9 ".len() - max.to_string().len()
+            ),
+        ] {
+            let err = try_read_line(&line).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn header_message_length_overflow() {
+        let max = usize::MAX;
+        for line in [
+            format!("HMSG FOO.BAR 9 12 {max}\r\n"),
+            format!(
+                "HMSG FOO.BAR 9 12 {}\r\n",
+                max - "HMSG FOO.BAR 9 12 ".len() - max.to_string().len()
+            ),
+        ] {
+            let err = try_read_line(&line).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{line:?}");
+        }
     }
 
     #[tokio::test]
