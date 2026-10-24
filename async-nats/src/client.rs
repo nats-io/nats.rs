@@ -20,7 +20,11 @@ use crate::message::OutboundMessage;
 use crate::subject::ToSubject;
 use crate::ServerInfo;
 
-use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
+use super::{
+    header::{HeaderMap, Headers},
+    status::StatusCode,
+    Command, Message, Subscriber,
+};
 use crate::error::Error;
 use bytes::Bytes;
 use futures_util::future::TryFutureExt;
@@ -192,7 +196,7 @@ impl traits::Publisher for Client {
         self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
             .map_err(max_payload_error)?;
         self.sender
-            .send(Command::Publish(msg))
+            .send(Command::from(msg))
             .await
             .map_err(Into::into)
     }
@@ -218,7 +222,7 @@ impl Sink<OutboundMessage> for Client {
         self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
             .map_err(max_payload_error)?;
         self.poll_sender
-            .start_send_unpin(Command::Publish(msg))
+            .start_send_unpin(Command::from(msg))
             .map_err(Into::into)
     }
 
@@ -370,11 +374,36 @@ impl Client {
         headers: Option<&HeaderMap>,
         payload_len: usize,
     ) -> Result<(), (usize, usize)> {
-        let max_payload = self.max_payload.load(Ordering::Relaxed);
-        let size = match headers {
-            Some(headers) if !headers.is_empty() => headers.wire_len() + payload_len,
-            _ => payload_len,
+        let headers_len = match headers {
+            Some(headers) if !headers.is_empty() => headers.wire_len(),
+            _ => 0,
         };
+        self.check_wire_size(headers_len, payload_len)
+    }
+
+    /// [`Client::check_payload_size`] for [`Headers`].
+    fn check_headers_size(
+        &self,
+        headers: &Headers,
+        payload_len: usize,
+    ) -> Result<(), (usize, usize)> {
+        let headers_len = if headers.is_empty() {
+            0
+        } else {
+            headers.wire_len()
+        };
+        self.check_wire_size(headers_len, payload_len)
+    }
+
+    /// Checks `headers_len + payload_len`, the server's `HPUB` total, against
+    /// the negotiated `max_payload`.
+    fn check_wire_size(
+        &self,
+        headers_len: usize,
+        payload_len: usize,
+    ) -> Result<(), (usize, usize)> {
+        let max_payload = self.max_payload.load(Ordering::Relaxed);
+        let size = headers_len + payload_len;
         if size > max_payload {
             Err((max_payload, size))
         } else {
@@ -459,17 +488,21 @@ impl Client {
             .map_err(max_payload_error)?;
 
         self.sender
-            .send(Command::Publish(OutboundMessage {
+            .send(Command::Publish {
                 subject,
                 payload,
-                reply: None,
+                respond: None,
                 headers: None,
-            }))
+            })
             .await?;
         Ok(())
     }
 
     /// Publish a [Message] with headers to a given subject.
+    ///
+    /// `headers` is a [HeaderMap], or an [EncodedHeaders](crate::EncodedHeaders) block, encoded once
+    /// by [HeaderMap::encode] and reused, with the headers that change per
+    /// publish added by [EncodedHeaders::with](crate::EncodedHeaders::with).
     ///
     /// # Examples
     /// ```
@@ -491,23 +524,24 @@ impl Client {
     pub async fn publish_with_headers<S: ToSubject>(
         &self,
         subject: S,
-        headers: HeaderMap,
+        headers: impl Into<Headers>,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let headers = headers.into();
         let subject = self
             .maybe_validate_publish_subject(subject)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
-        self.check_payload_size(Some(&headers), payload.len())
+        self.check_headers_size(&headers, payload.len())
             .map_err(max_payload_error)?;
 
         self.sender
-            .send(Command::Publish(OutboundMessage {
+            .send(Command::Publish {
                 subject,
                 payload,
-                reply: None,
+                respond: None,
                 headers: Some(headers),
-            }))
+            })
             .await?;
         Ok(())
     }
@@ -545,12 +579,12 @@ impl Client {
             .map_err(max_payload_error)?;
 
         self.sender
-            .send(Command::Publish(OutboundMessage {
+            .send(Command::Publish {
                 subject,
                 payload,
-                reply: Some(reply),
+                respond: Some(reply),
                 headers: None,
-            }))
+            })
             .await?;
         Ok(())
     }
@@ -558,6 +592,8 @@ impl Client {
     /// Publish a [Message] to a given subject with headers and specified response subject
     /// to which the subscriber can respond.
     /// This method does not await for the response.
+    ///
+    /// `headers` takes the same forms as in [Client::publish_with_headers].
     ///
     /// # Examples
     ///
@@ -577,9 +613,10 @@ impl Client {
         &self,
         subject: S,
         reply: R,
-        headers: HeaderMap,
+        headers: impl Into<Headers>,
         payload: Bytes,
     ) -> Result<(), PublishError> {
+        let headers = headers.into();
         let subject = self
             .maybe_validate_publish_subject(subject)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
@@ -587,16 +624,16 @@ impl Client {
             .maybe_validate_publish_subject(reply)
             .map_err(|e| PublishError::with_source(PublishErrorKind::InvalidSubject, e))?;
 
-        self.check_payload_size(Some(&headers), payload.len())
+        self.check_headers_size(&headers, payload.len())
             .map_err(max_payload_error)?;
 
         self.sender
-            .send(Command::Publish(OutboundMessage {
+            .send(Command::Publish {
                 subject,
                 payload,
-                reply: Some(reply),
+                respond: Some(reply),
                 headers: Some(headers),
-            }))
+            })
             .await?;
         Ok(())
     }

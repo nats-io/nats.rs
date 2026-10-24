@@ -244,7 +244,7 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use connector::{ReconnectToServer, Server};
-pub use header::{HeaderMap, HeaderName, HeaderValue};
+pub use header::{EncodedHeaders, HeaderMap, HeaderName, HeaderValue, Headers};
 pub use subject::{Subject, SubjectError, ToSubject};
 
 mod auth;
@@ -384,7 +384,12 @@ pub type PublishMessage = crate::message::OutboundMessage;
 /// `Command` represents all commands that a [`Client`] can handle
 #[derive(Debug)]
 pub(crate) enum Command {
-    Publish(OutboundMessage),
+    Publish {
+        subject: Subject,
+        payload: Bytes,
+        respond: Option<Subject>,
+        headers: Option<Headers>,
+    },
     Request {
         subject: Subject,
         payload: Bytes,
@@ -418,6 +423,17 @@ pub(crate) enum Command {
     },
 }
 
+impl From<OutboundMessage> for Command {
+    fn from(msg: OutboundMessage) -> Self {
+        Command::Publish {
+            subject: msg.subject,
+            payload: msg.payload,
+            respond: msg.reply,
+            headers: msg.headers.map(Headers::from),
+        }
+    }
+}
+
 /// `ClientOp` represents all actions of `Client`.
 #[derive(Debug)]
 pub(crate) enum ClientOp {
@@ -425,7 +441,7 @@ pub(crate) enum ClientOp {
         subject: Subject,
         payload: Bytes,
         respond: Option<Subject>,
-        headers: Option<HeaderMap>,
+        headers: Option<Headers>,
     },
     Subscribe {
         sid: u64,
@@ -926,18 +942,18 @@ impl ConnectionHandler {
                     subject,
                     payload,
                     respond: Some(respond),
-                    headers,
+                    headers: headers.map(Headers::from),
                 };
 
                 self.connection.enqueue_write_op(&pub_op);
             }
 
-            Command::Publish(OutboundMessage {
+            Command::Publish {
                 subject,
                 payload,
-                reply: respond,
+                respond,
                 headers,
-            }) => {
+            } => {
                 self.connector
                     .connect_stats
                     .out_messages
