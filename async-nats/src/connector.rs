@@ -712,27 +712,44 @@ impl Connector {
             .easy_write_and_flush([ClientOp::Connect(connect_info), ClientOp::Ping].iter())
             .await?;
 
-        match connection.read_op().await? {
-            Some(ServerOp::Error(err)) => match err {
-                ServerError::AuthorizationViolation => {
+        // Only the PONG answering our PING completes the handshake. The server
+        // arms its own first PING when CONNECT arrives, so a slow authorization
+        // can put that PING ahead of the answer to CONNECT.
+        loop {
+            match connection.read_op().await? {
+                Some(ServerOp::Pong) => return Ok((*info, connection)),
+                Some(ServerOp::Ping) => {
+                    connection
+                        .easy_write_and_flush([ClientOp::Pong].iter())
+                        .await?;
+                }
+                // An asynchronous INFO or a `+OK` can precede the PONG.
+                Some(ServerOp::Info(_)) | Some(ServerOp::Ok) => {}
+                Some(ServerOp::Error(err @ ServerError::AuthorizationViolation)) => {
                     tracing::error!(error = %err, "authorization violation");
-                    Err(ConnectError::with_source(
+                    return Err(ConnectError::with_source(
                         crate::ConnectErrorKind::AuthorizationViolation,
                         err,
-                    ))
+                    ));
                 }
-                err => {
+                Some(ServerOp::Error(err)) => {
                     tracing::error!(error = %err, "server error during connection");
-                    Err(ConnectError::with_source(crate::ConnectErrorKind::Io, err))
+                    return Err(ConnectError::with_source(crate::ConnectErrorKind::Io, err));
                 }
-            },
-            Some(_) => Ok((*info, connection)),
-            None => {
-                tracing::error!("connection closed unexpectedly");
-                Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    "broken pipe",
-                ))
+                Some(ServerOp::Message { .. }) => {
+                    tracing::error!("message received before the connection was established");
+                    return Err(ConnectError::with_source(
+                        crate::ConnectErrorKind::Io,
+                        "unexpected message during connection",
+                    ));
+                }
+                None => {
+                    tracing::error!("connection closed unexpectedly");
+                    return Err(ConnectError::with_source(
+                        crate::ConnectErrorKind::Io,
+                        "broken pipe",
+                    ));
+                }
             }
         }
     }
