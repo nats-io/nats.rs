@@ -22,7 +22,7 @@
 
 use std::{collections::HashMap, fmt, slice::Iter, str::FromStr};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A struct for handling NATS headers.
@@ -154,17 +154,54 @@ impl HeaderMap {
         self.inner.len()
     }
 
-    /// Serialized byte length of this header block (as [`HeaderMap::to_bytes`]
-    /// produces), computed without allocating.
+    /// Serialized byte length of this header block (as [`HeaderMap::write_to`]
+    /// writes it), computed without allocating.
     pub(crate) fn wire_len(&self) -> usize {
-        // Mirrors `to_bytes`: "NATS/1.0\r\n" + each "<key>: <value>\r\n" + "\r\n".
-        let mut len = b"NATS/1.0\r\n".len() + b"\r\n".len();
+        STATUS_LINE.len() + self.fields_len() + TERMINATOR.len()
+    }
+
+    /// Byte length of the `<key>: <value>\r\n` lines, as
+    /// [`HeaderMap::write_fields`] writes them.
+    fn fields_len(&self) -> usize {
+        let mut len = 0;
         for (k, vs) in &self.inner {
             for v in vs.iter() {
                 len += k.as_str().len() + b": ".len() + v.inner.len() + b"\r\n".len();
             }
         }
         len
+    }
+
+    /// Encodes this map once, for sending on many publishes.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let mut shared = async_nats::HeaderMap::new();
+    /// shared.insert("Session", "a1b2");
+    /// let shared = shared.encode();
+    ///
+    /// for seq in 1..=3u64 {
+    ///     let mut extra = async_nats::HeaderMap::new();
+    ///     extra.insert("Seq", seq.to_string().as_str());
+    ///     client
+    ///         .publish_with_headers("events.data", shared.with(extra), "payload".into())
+    ///         .await?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn encode(&self) -> EncodedHeaders {
+        let mut buf = BytesMut::with_capacity(STATUS_LINE.len() + self.fields_len());
+        buf.put_slice(STATUS_LINE);
+        self.write_fields(&mut buf);
+        EncodedHeaders {
+            bytes: buf.freeze(),
+            names: self.inner.len(),
+        }
     }
 }
 
@@ -266,19 +303,137 @@ impl HeaderMap {
         GetAll { inner }
     }
 
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = vec![];
-        buf.extend_from_slice(b"NATS/1.0\r\n");
+    /// Appends the serialized header block, [`HeaderMap::wire_len`] bytes
+    /// long, to `buf`.
+    pub(crate) fn write_to<B: BufMut>(&self, buf: &mut B) {
+        buf.put_slice(STATUS_LINE);
+        self.write_fields(buf);
+        buf.put_slice(TERMINATOR);
+    }
+
+    /// Appends the `<key>: <value>\r\n` lines, [`HeaderMap::fields_len`]
+    /// bytes long, to `buf`.
+    fn write_fields<B: BufMut>(&self, buf: &mut B) {
         for (k, vs) in &self.inner {
             for v in vs.iter() {
-                buf.extend_from_slice(k.as_str().as_bytes());
-                buf.extend_from_slice(b": ");
-                buf.extend_from_slice(v.inner.as_bytes());
-                buf.extend_from_slice(b"\r\n");
+                buf.put_slice(k.as_str().as_bytes());
+                buf.put_slice(b": ");
+                buf.put_slice(v.inner.as_bytes());
+                buf.put_slice(b"\r\n");
             }
         }
-        buf.extend_from_slice(b"\r\n");
-        buf
+    }
+}
+
+/// The first line of every header block.
+const STATUS_LINE: &[u8] = b"NATS/1.0\r\n";
+
+/// The blank line that ends every header block.
+const TERMINATOR: &[u8] = b"\r\n";
+
+/// A header block encoded once by [`HeaderMap::encode`], for sending on many
+/// publishes without encoding it again.
+///
+/// Cloning is cheap: clones share the encoded bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EncodedHeaders {
+    /// The status line and every field line, without the terminating blank
+    /// line, so the fields a publish adds can follow them.
+    bytes: Bytes,
+    /// The number of header names the block holds.
+    names: usize,
+}
+
+impl EncodedHeaders {
+    /// The headers of a publish that sends this block followed by `extra`.
+    ///
+    /// Only `extra` is encoded at publish time. A name present in both is sent
+    /// with the values from each.
+    pub fn with(&self, extra: HeaderMap) -> Headers {
+        Headers(Repr::Encoded {
+            shared: self.clone(),
+            extra,
+        })
+    }
+}
+
+/// The headers of a publish: a [`HeaderMap`], encoded when it is published,
+/// or an [`EncodedHeaders`] block with the headers added per publish.
+///
+/// Publish methods take `impl Into<Headers>`, so a [`HeaderMap`] or an
+/// [`EncodedHeaders`] can be passed directly.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Headers(Repr);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Repr {
+    Map(HeaderMap),
+    Encoded {
+        shared: EncodedHeaders,
+        extra: HeaderMap,
+    },
+}
+
+impl From<HeaderMap> for Headers {
+    fn from(map: HeaderMap) -> Self {
+        Headers(Repr::Map(map))
+    }
+}
+
+impl From<EncodedHeaders> for Headers {
+    fn from(shared: EncodedHeaders) -> Self {
+        Headers(Repr::Encoded {
+            shared,
+            extra: HeaderMap::new(),
+        })
+    }
+}
+
+impl From<&EncodedHeaders> for Headers {
+    fn from(shared: &EncodedHeaders) -> Self {
+        Headers::from(shared.clone())
+    }
+}
+
+impl Headers {
+    /// Whether the headers hold no field, in which case a publish sends none.
+    pub(crate) fn is_empty(&self) -> bool {
+        match &self.0 {
+            Repr::Map(map) => map.is_empty(),
+            Repr::Encoded { shared, extra } => shared.names == 0 && extra.is_empty(),
+        }
+    }
+
+    /// The number of header names, counting a name in both parts twice.
+    pub(crate) fn len(&self) -> usize {
+        match &self.0 {
+            Repr::Map(map) => map.len(),
+            Repr::Encoded { shared, extra } => shared.names + extra.len(),
+        }
+    }
+
+    /// Serialized byte length of the header block, as
+    /// [`Headers::write_to`] writes it.
+    pub(crate) fn wire_len(&self) -> usize {
+        match &self.0 {
+            Repr::Map(map) => map.wire_len(),
+            Repr::Encoded { shared, extra } => {
+                shared.bytes.len() + extra.fields_len() + TERMINATOR.len()
+            }
+        }
+    }
+
+    /// Appends the serialized header block, [`Headers::wire_len`] bytes long,
+    /// to `buf`.
+    pub(crate) fn write_to<B: BufMut>(&self, buf: &mut B) {
+        match &self.0 {
+            Repr::Map(map) => map.write_to(buf),
+            Repr::Encoded { shared, extra } => {
+                buf.put_slice(&shared.bytes);
+                extra.write_fields(buf);
+                buf.put_slice(TERMINATOR);
+            }
+        }
     }
 }
 
@@ -841,8 +996,14 @@ fn validate_header_name(s: &str) -> Result<(), ParseHeaderNameError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HeaderMap, HeaderName, HeaderValue, IntoHeaderName, IntoHeaderValue};
+    use super::{HeaderMap, HeaderName, HeaderValue, Headers, IntoHeaderName, IntoHeaderValue};
     use std::str::{from_utf8, FromStr};
+
+    fn to_bytes(headers: &HeaderMap) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(headers.wire_len());
+        headers.write_to(&mut buf);
+        buf
+    }
 
     #[test]
     fn try_from() {
@@ -913,7 +1074,7 @@ mod tests {
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
 
-        let bytes = headers.to_bytes();
+        let bytes = to_bytes(&headers);
 
         println!("bytes: {:?}", from_utf8(&bytes));
     }
@@ -924,11 +1085,59 @@ mod tests {
         headers.append("Key", "value");
         headers.append("Key", "second_value");
         headers.insert("Second", "SecondValue");
-        assert_eq!(headers.wire_len(), headers.to_bytes().len());
+        assert_eq!(headers.wire_len(), to_bytes(&headers).len());
 
         // An empty block still serializes the framing bytes.
         let empty = HeaderMap::new();
-        assert_eq!(empty.wire_len(), empty.to_bytes().len());
+        assert_eq!(empty.wire_len(), to_bytes(&empty).len());
+    }
+
+    fn headers_bytes(headers: &Headers) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(headers.wire_len());
+        headers.write_to(&mut buf);
+        buf
+    }
+
+    #[test]
+    fn encoded_headers_followed_by_extra() {
+        let mut shared = HeaderMap::new();
+        shared.append("Session", "a1b2");
+        shared.append("Session", "c3d4");
+        let shared = shared.encode();
+
+        let mut extra = HeaderMap::new();
+        extra.insert("Seq", "7");
+        let headers = shared.with(extra);
+
+        let bytes = headers_bytes(&headers);
+        assert_eq!(
+            from_utf8(&bytes).unwrap(),
+            "NATS/1.0\r\nSession: a1b2\r\nSession: c3d4\r\nSeq: 7\r\n\r\n"
+        );
+        assert_eq!(headers.wire_len(), bytes.len());
+        assert_eq!(headers.len(), 2);
+        assert!(!headers.is_empty());
+    }
+
+    #[test]
+    fn encoded_headers_alone_match_the_map() {
+        let mut map = HeaderMap::new();
+        map.insert("Session", "a1b2");
+
+        let encoded = Headers::from(map.encode());
+        let bytes = headers_bytes(&encoded);
+        assert_eq!(bytes, to_bytes(&map));
+        assert_eq!(encoded.wire_len(), bytes.len());
+    }
+
+    #[test]
+    fn empty_encoded_headers_are_empty() {
+        let headers = HeaderMap::new().encode().with(HeaderMap::new());
+        assert!(headers.is_empty());
+
+        let mut extra = HeaderMap::new();
+        extra.insert("Seq", "1");
+        assert!(!HeaderMap::new().encode().with(extra).is_empty());
     }
 
     #[test]
