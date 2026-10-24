@@ -523,12 +523,10 @@ impl Connection {
 
                 match headers {
                     Some(headers) if !headers.is_empty() => {
-                        let headers = headers.to_bytes();
-
-                        let headers_len = headers.len();
+                        let headers_len = headers.wire_len();
                         let total_len = headers_len + payload.len();
                         small_write!("{headers_len} {total_len}\r\n");
-                        self.write(headers);
+                        self.write_headers(headers, headers_len);
                     }
                     _ => {
                         let payload_len = payload.len();
@@ -728,6 +726,28 @@ impl Connection {
             }
 
             self.write_buf.push_back(buf);
+        }
+    }
+
+    /// Write the serialized `headers`, `len` bytes long, into the writes buffer
+    ///
+    /// Like [`Self::write`], a block smaller than [`WRITE_FLATTEN_THRESHOLD`]
+    /// is flattened, encoded straight into the small writes buffer. A larger
+    /// one is encoded into its own buffer and appended to the chunks queue, so
+    /// the small writes buffer does not keep its capacity once it is sent.
+    fn write_headers(&mut self, headers: &HeaderMap, len: usize) {
+        if len < WRITE_FLATTEN_THRESHOLD {
+            self.flattened_writes.reserve(len);
+            let start = self.flattened_writes.len();
+            headers.write_to(&mut self.flattened_writes);
+            let written = self.flattened_writes.len() - start;
+            debug_assert_eq!(written, len);
+            self.write_buf_len += written;
+        } else {
+            let mut buf = BytesMut::with_capacity(len);
+            headers.write_to(&mut buf);
+            debug_assert_eq!(buf.len(), len);
+            self.write(buf.freeze());
         }
     }
 
@@ -1201,7 +1221,7 @@ mod write_op {
 
     use super::Connection;
     use crate::{ClientOp, ConnectInfo, HeaderMap, Protocol, Statistics};
-    use tokio::io::{self, AsyncBufReadExt, BufReader};
+    use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
 
     #[tokio::test]
     async fn publish() {
@@ -1266,10 +1286,69 @@ mod write_op {
         reader.read_line(&mut buffer).await.unwrap();
         reader.read_line(&mut buffer).await.unwrap();
         reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
         assert_eq!(
             buffer,
-            "HPUB FOO.BAR INBOX.67 23 34\r\nNATS/1.0\r\nHeader: X\r\n\r\n"
+            "HPUB FOO.BAR INBOX.67 23 34\r\nNATS/1.0\r\nHeader: X\r\n\r\nHello World\r\n"
         );
+    }
+
+    #[tokio::test]
+    async fn publish_with_headers_over_flatten_threshold() {
+        let value = "X".repeat(super::WRITE_FLATTEN_THRESHOLD);
+        let headers = format!("NATS/1.0\r\nHeader: {value}\r\n\r\n");
+        // The large block sits between two small writes, so the pending
+        // flattened bytes must reach the wire before it and the next after it.
+        let expected = format!(
+            "PUB FOO.BEFORE 11\r\nHello World\r\nHPUB FOO.BAR {} {}\r\n{headers}Hello World\r\nPUB FOO.AFTER 11\r\nHello World\r\n",
+            headers.len(),
+            headers.len() + "Hello World".len(),
+        );
+
+        // Room for every frame, as nothing reads them until they are flushed.
+        let (stream, mut server) = io::duplex(expected.len());
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        let ops = [
+            ClientOp::Publish {
+                subject: "FOO.BEFORE".into(),
+                payload: "Hello World".into(),
+                respond: None,
+                headers: None,
+            },
+            ClientOp::Publish {
+                subject: "FOO.BAR".into(),
+                payload: "Hello World".into(),
+                respond: None,
+                headers: Some(HeaderMap::from_iter([(
+                    "Header".parse().unwrap(),
+                    value.parse().unwrap(),
+                )])),
+            },
+            ClientOp::Publish {
+                subject: "FOO.AFTER".into(),
+                payload: "Hello World".into(),
+                respond: None,
+                headers: None,
+            },
+        ];
+        for op in &ops {
+            connection.enqueue_write_op(op);
+        }
+
+        // The block is queued as its own chunk, after the flattened bytes
+        // written before it.
+        assert_eq!(connection.write_buf.len(), 2);
+        assert_eq!(connection.write_buf[1], headers.as_bytes());
+
+        connection
+            .easy_write_and_flush(std::iter::empty())
+            .await
+            .unwrap();
+
+        let mut buffer = vec![0; expected.len()];
+        server.read_exact(&mut buffer).await.unwrap();
+        assert_eq!(String::from_utf8(buffer).unwrap(), expected);
     }
 
     #[tokio::test]
