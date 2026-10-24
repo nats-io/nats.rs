@@ -1902,6 +1902,118 @@ mod client {
         handle.abort();
     }
 
+    // Regression tests for https://github.com/nats-io/nats.rs/issues/1648.
+    //
+    // The server arms its first PING when CONNECT arrives, so a slow
+    // authorization can deliver that PING before the answer to CONNECT. Only
+    // the PONG answering the client's own PING completes the handshake.
+
+    /// Accepts one connection, sends INFO and waits for the client's CONNECT
+    /// and PING.
+    async fn accept_until_handshake_ping(
+        listener: tokio::net::TcpListener,
+    ) -> tokio::net::TcpStream {
+        let port = listener.local_addr().unwrap().port();
+        let (mut stream, _peer) = listener.accept().await.unwrap();
+        let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{port},\"max_payload\":1048576}}\r\n");
+        stream.write_all(info.as_bytes()).await.unwrap();
+        read_until(&mut stream, b"PING\r\n").await;
+        stream
+    }
+
+    /// Reads from `stream` until `needle` has arrived.
+    async fn read_until(stream: &mut tokio::net::TcpStream, needle: &[u8]) {
+        let mut received = Vec::new();
+        let mut buf = [0u8; 1024];
+        while !received.windows(needle.len()).any(|w| w == needle) {
+            let n = stream.read(&mut buf).await.unwrap();
+            assert_ne!(n, 0, "client closed before sending {needle:?}");
+            received.extend_from_slice(&buf[..n]);
+        }
+    }
+
+    #[tokio::test]
+    async fn handshake_server_ping_before_authorization_violation() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // The server task returns its stream so the socket stays open until
+        // the test has observed the outcome.
+        let server = tokio::spawn(async move {
+            let mut stream = accept_until_handshake_ping(listener).await;
+            stream.write_all(b"PING\r\n").await.unwrap();
+            // The client answers the server's PING while it waits for its PONG.
+            read_until(&mut stream, b"PONG\r\n").await;
+            stream
+                .write_all(b"-ERR 'Authorization Violation'\r\n")
+                .await
+                .unwrap();
+            stream
+        });
+
+        let result = ConnectOptions::new()
+            .connection_timeout(Duration::from_secs(5))
+            .connect(format!("nats://127.0.0.1:{}", addr.port()))
+            .await;
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            ConnectErrorKind::AuthorizationViolation,
+            "a server PING must not complete the handshake"
+        );
+        let _stream = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("fake server did not finish")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn handshake_answers_server_ping_and_waits_for_pong() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // The server holds its PONG back until the test has checked that
+        // connect is still waiting for it.
+        let (got_pong_tx, got_pong_rx) = tokio::sync::oneshot::channel();
+        let (send_pong_tx, send_pong_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let mut stream = accept_until_handshake_ping(listener).await;
+            stream.write_all(b"PING\r\n").await.unwrap();
+            read_until(&mut stream, b"PONG\r\n").await;
+            got_pong_tx.send(()).unwrap();
+            send_pong_rx.await.unwrap();
+            stream.write_all(b"PONG\r\n").await.unwrap();
+            stream
+        });
+
+        let connect = tokio::spawn(
+            ConnectOptions::new()
+                .connection_timeout(Duration::from_secs(5))
+                .connect(format!("nats://127.0.0.1:{}", addr.port())),
+        );
+
+        tokio::time::timeout(Duration::from_secs(5), got_pong_rx)
+            .await
+            .expect("the client never answered the server's PING")
+            .unwrap();
+        assert!(
+            !connect.is_finished(),
+            "connect returned before the server answered the client's PING"
+        );
+        send_pong_tx.send(()).unwrap();
+
+        let client = tokio::time::timeout(Duration::from_secs(5), connect)
+            .await
+            .expect("connect did not finish after the server's PONG")
+            .unwrap()
+            .unwrap();
+        let _stream = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("fake server did not finish")
+            .unwrap();
+        assert_eq!(client.connection_state(), State::Connected);
+    }
+
     // Regression test for https://github.com/nats-io/nats.rs/issues/1593.
     //
     // A silent (network-partitioned) server must be detected via the client-origin
