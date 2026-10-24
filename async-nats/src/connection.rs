@@ -35,7 +35,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::trace;
 
-use crate::header::{HeaderMap, HeaderName, IntoHeaderValue};
+use crate::header::{HeaderMap, HeaderName, Headers, IntoHeaderValue};
 use crate::status::StatusCode;
 use crate::subject::Subject;
 use crate::{ClientOp, ServerError, ServerOp, Statistics};
@@ -735,7 +735,7 @@ impl Connection {
     /// is flattened, encoded straight into the small writes buffer. A larger
     /// one is encoded into its own buffer and appended to the chunks queue, so
     /// the small writes buffer does not keep its capacity once it is sent.
-    fn write_headers(&mut self, headers: &HeaderMap, len: usize) {
+    fn write_headers(&mut self, headers: &Headers, len: usize) {
         if len < WRITE_FLATTEN_THRESHOLD {
             self.flattened_writes.reserve(len);
             let start = self.flattened_writes.len();
@@ -1271,10 +1271,10 @@ mod write_op {
                     subject: "FOO.BAR".into(),
                     payload: "Hello World".into(),
                     respond: Some("INBOX.67".into()),
-                    headers: Some(HeaderMap::from_iter([(
-                        "Header".parse().unwrap(),
-                        "X".parse().unwrap(),
-                    )])),
+                    headers: Some(
+                        HeaderMap::from_iter([("Header".parse().unwrap(), "X".parse().unwrap())])
+                            .into(),
+                    ),
                 }]
                 .iter(),
             )
@@ -1291,6 +1291,65 @@ mod write_op {
             buffer,
             "HPUB FOO.BAR INBOX.67 23 34\r\nNATS/1.0\r\nHeader: X\r\n\r\nHello World\r\n"
         );
+    }
+
+    #[tokio::test]
+    async fn publish_with_encoded_headers() {
+        let (stream, server) = io::duplex(256);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+        let mut reader = BufReader::new(server);
+
+        let shared =
+            HeaderMap::from_iter([("Session".parse().unwrap(), "a1b2".parse().unwrap())]).encode();
+        let publish = |seq: &str, shared: &crate::EncodedHeaders| ClientOp::Publish {
+            subject: "FOO.BAR".into(),
+            payload: "Hello World".into(),
+            respond: None,
+            headers: Some(shared.with(HeaderMap::from_iter([(
+                "Seq".parse().unwrap(),
+                seq.parse().unwrap(),
+            )]))),
+        };
+
+        connection
+            .easy_write_and_flush([publish("1", &shared), publish("2", &shared)].iter())
+            .await
+            .unwrap();
+
+        let mut buffer = String::new();
+        for _ in 0..12 {
+            reader.read_line(&mut buffer).await.unwrap();
+        }
+        assert_eq!(
+            buffer,
+            "HPUB FOO.BAR 35 46\r\nNATS/1.0\r\nSession: a1b2\r\nSeq: 1\r\n\r\nHello World\r\n\
+             HPUB FOO.BAR 35 46\r\nNATS/1.0\r\nSession: a1b2\r\nSeq: 2\r\n\r\nHello World\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_with_empty_encoded_headers() {
+        let (stream, server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+        let mut reader = BufReader::new(server);
+
+        connection
+            .easy_write_and_flush(
+                [ClientOp::Publish {
+                    subject: "FOO.BAR".into(),
+                    payload: "Hello World".into(),
+                    respond: None,
+                    headers: Some(HeaderMap::new().encode().into()),
+                }]
+                .iter(),
+            )
+            .await
+            .unwrap();
+
+        let mut buffer = String::new();
+        reader.read_line(&mut buffer).await.unwrap();
+        reader.read_line(&mut buffer).await.unwrap();
+        assert_eq!(buffer, "PUB FOO.BAR 11\r\nHello World\r\n");
     }
 
     #[tokio::test]
@@ -1320,10 +1379,10 @@ mod write_op {
                 subject: "FOO.BAR".into(),
                 payload: "Hello World".into(),
                 respond: None,
-                headers: Some(HeaderMap::from_iter([(
-                    "Header".parse().unwrap(),
-                    value.parse().unwrap(),
-                )])),
+                headers: Some(
+                    HeaderMap::from_iter([("Header".parse().unwrap(), value.parse().unwrap())])
+                        .into(),
+                ),
             },
             ClientOp::Publish {
                 subject: "FOO.AFTER".into(),
