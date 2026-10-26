@@ -415,7 +415,7 @@ impl Connector {
             )
             .await
             {
-                Ok(Ok((server_info, connection))) => {
+                Ok(Ok((server_info, connection, lame_duck_mode))) => {
                     tracing::info!(
                         server = %server_info.port,
                         max_payload = %server_info.max_payload,
@@ -424,6 +424,10 @@ impl Connector {
                     self.attempts = 0;
                     self.connect_stats.connects.add(1, Ordering::Relaxed);
                     self.events_tx.try_send(Event::Connected).ok();
+                    if lame_duck_mode {
+                        tracing::debug!("server in lame duck mode");
+                        self.events_tx.try_send(Event::LameDuckMode).ok();
+                    }
                     self.state_tx.send(State::Connected).ok();
                     self.max_payload.store(
                         server_info.max_payload,
@@ -474,7 +478,7 @@ impl Connector {
         socket_addr: &SocketAddr,
         tls_required: bool,
         server_addr: ServerAddr,
-    ) -> Result<(ServerInfo, Connection), ConnectError> {
+    ) -> Result<(ServerInfo, Connection, bool), ConnectError> {
         tracing::debug!(
             socket_addr = %socket_addr,
             tls_required = %tls_required,
@@ -714,17 +718,21 @@ impl Connector {
 
         // Only the PONG answering our PING completes the handshake. The server
         // arms its own first PING when CONNECT arrives, so a slow authorization
-        // can put that PING ahead of the answer to CONNECT.
+        // can put that PING ahead of the answer to CONNECT. Whether an INFO
+        // read here reported lame duck mode is returned alongside, so the event
+        // still follows `Connected`.
+        let mut lame_duck_mode = false;
         loop {
             match connection.read_op().await? {
-                Some(ServerOp::Pong) => return Ok((*info, connection)),
+                Some(ServerOp::Pong) => return Ok((*info, connection, lame_duck_mode)),
                 Some(ServerOp::Ping) => {
                     connection
                         .easy_write_and_flush([ClientOp::Pong].iter())
                         .await?;
                 }
                 // An asynchronous INFO or a `+OK` can precede the PONG.
-                Some(ServerOp::Info(_)) | Some(ServerOp::Ok) => {}
+                Some(ServerOp::Info(update)) => lame_duck_mode |= update.lame_duck_mode,
+                Some(ServerOp::Ok) => {}
                 Some(ServerOp::Error(err @ ServerError::AuthorizationViolation)) => {
                     tracing::error!(error = %err, "authorization violation");
                     return Err(ConnectError::with_source(

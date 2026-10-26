@@ -2014,6 +2014,48 @@ mod client {
         assert_eq!(client.connection_state(), State::Connected);
     }
 
+    #[tokio::test]
+    async fn handshake_lame_duck_info_before_pong() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let port = addr.port();
+
+        let server = tokio::spawn(async move {
+            let mut stream = accept_until_handshake_ping(listener).await;
+            stream.write_all(b"PING\r\n").await.unwrap();
+            read_until(&mut stream, b"PONG\r\n").await;
+            let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{port},\"max_payload\":1048576,\"ldm\":true}}\r\n");
+            stream.write_all(info.as_bytes()).await.unwrap();
+            stream.write_all(b"PONG\r\n").await.unwrap();
+            stream
+        });
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let _client = ConnectOptions::new()
+            .connection_timeout(Duration::from_secs(5))
+            .event_callback(move |event| {
+                let events_tx = events_tx.clone();
+                async move {
+                    events_tx.send(event).ok();
+                }
+            })
+            .connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+
+        for expected in [Event::Connected, Event::LameDuckMode] {
+            let event = tokio::time::timeout(Duration::from_secs(5), events_rx.recv())
+                .await
+                .unwrap_or_else(|_| panic!("no {expected:?} event"))
+                .unwrap();
+            assert_eq!(event, expected);
+        }
+        let _stream = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("fake server did not finish")
+            .unwrap();
+    }
+
     // Regression test for https://github.com/nats-io/nats.rs/issues/1593.
     //
     // A silent (network-partitioned) server must be detected via the client-origin
