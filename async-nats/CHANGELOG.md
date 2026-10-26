@@ -1,3 +1,62 @@
+# v0.51.0
+## Overview
+
+This release adds pinned client support for pull consumers and fixes a number of panics and hangs across JetStream, KV, Object Store and Service APIs.
+JetStream API requests are now bounded by the JetStream context timeout when it is set.
+
+It is a minor release because it adds variants to error kind enums, adds public fields to consumer types and raises the MSRV to 1.89.
+
+## Added
+* Add pinned client support for pull consumers by @Nielswps in https://github.com/nats-io/nats.rs/pull/1652
+* Add priority_timeout, unpin_consumer and consumer priority group state by @Nielswps in https://github.com/nats-io/nats.rs/pull/1653
+* Add docs.nats.io examples by @Jarema in https://github.com/nats-io/nats.rs/pull/1610
+
+## Fixed
+* Fix FetchBuilder::priority overwriting batch size instead of setting priority by @Jarema in https://github.com/nats-io/nats.rs/pull/1620
+* Accept the 11-token v2 JetStream ack subject by @Jarema in https://github.com/nats-io/nats.rs/pull/1624
+* Fix object store reads panicking on a JetStream timeout by @macrauder in https://github.com/nats-io/nats.rs/pull/1621
+* Avoid panic in Subscriber::drop when dropped outside a runtime by @lives-hoth in https://github.com/nats-io/nats.rs/pull/1608
+* Fix spurious MissingHeartbeat while consumer messages are buffered by @Jarema in https://github.com/nats-io/nats.rs/pull/1627
+* Stop pull consumers from hot-looping on 409 Exceeded MaxRequest* by @Jarema in https://github.com/nats-io/nats.rs/pull/1631
+* Fix KV history and keys hanging when no entry arrives by @Jarema in https://github.com/nats-io/nats.rs/pull/1635
+* Bound JetStream API requests by the context timeout when it is set by @Jarema in https://github.com/nats-io/nats.rs/pull/1636
+* Fix service verb handler panicking on requests without a reply subject by @cacoco in https://github.com/nats-io/nats.rs/pull/1640
+* Fix Service::stop leaving the service registered when no endpoint listens by @cacoco in https://github.com/nats-io/nats.rs/pull/1658
+* Fix service error Display swapping code and status by @SashaMIT in https://github.com/nats-io/nats.rs/pull/1645
+* Redact secrets in ConnectInfo Debug output by @stasimus in https://github.com/nats-io/nats.rs/pull/1616
+
+## Changed
+* Use direct get in ObjectStore::info() when the stream allows it by @sheapwilliams in https://github.com/nats-io/nats.rs/pull/1632
+* Improve ordered consumers naming by @Jarema in https://github.com/nats-io/nats.rs/pull/1626
+* Clean up websocket dependencies and update tokio-websockets to 0.13.3 by @Jarema in https://github.com/nats-io/nats.rs/pull/1656
+* Tidy the object store read error path by @Jarema in https://github.com/nats-io/nats.rs/pull/1625
+
+## Breaking changes
+* MSRV is now Rust 1.89, required by tokio-websockets 0.13 (#1656).
+* The minimum aws-lc-rs version is now 1.18, as older releases allow an aws-lc-fips-sys that does not build with CMake 4. Under `fips` this moves the bundled AWS-LC-FIPS module from 3.x to 4.x.
+* New error kind variants: `MessagesErrorKind::RequestLimitExceeded` and `OrderedErrorKind::RequestLimitExceeded` (#1631), `BatchErrorKind::PinnedClient` (#1652). Exhaustive `match`es on these enums need a new arm.
+* New public fields behind `server_2_11`: `priority_timeout` on `consumer::Config` and `pull::Config`, `priority_groups` on `consumer::Info` (#1653). Struct literals without `..Default::default()` need updating (`Info` has no `Default`).
+* Websocket errors behind `ConnectError` sources are now tokio-websockets 0.13 types, so downcasts to the 0.10 type stop matching (#1656).
+
+## Behaviour changes
+* When the JetStream context timeout (`ContextBuilder::timeout`, `Context::set_timeout`) is set, it is now the only bound for every JetStream API request, whether it is lower or higher than the connection `request_timeout`. When it is not set, API requests keep using `request_timeout` (#1636).
+* `fetch()`, `batch()` and `sequence()` return `BatchErrorKind::PinnedClient` on a `PriorityPolicy::PinnedClient` consumer. Use `stream()` or `messages()` instead (#1652).
+* A pull consumer stream rejected with `409 Exceeded MaxRequest*` now ends with `MessagesErrorKind::RequestLimitExceeded` instead of re-pulling forever. Batch and expiry defaults the user did not set are capped at the consumer's limits, and `OrderedConfig::max_batch` now reaches the server (#1631).
+* A recreated ordered consumer is named `{name}_{n}`, using the configured name or the name the server gave the first consumer. The previous consumer is now deleted on recreation, unnamed ones included (#1626).
+* `ObjectStore::info()`, and so `put()`, uses direct get when the stream allows it, so lookups of missing objects no longer count as JetStream API errors (#1632).
+* For `ws://` and `wss://` on the default port, the Host header no longer includes the port. webpki-roots is no longer a dependency (#1656).
+
+## New Contributors
+* @macrauder made their first contribution in https://github.com/nats-io/nats.rs/pull/1621
+* @lives-hoth made their first contribution in https://github.com/nats-io/nats.rs/pull/1608
+* @sheapwilliams made their first contribution in https://github.com/nats-io/nats.rs/pull/1632
+* @cacoco made their first contribution in https://github.com/nats-io/nats.rs/pull/1640
+* @Nielswps made their first contribution in https://github.com/nats-io/nats.rs/pull/1653
+* @SashaMIT made their first contribution in https://github.com/nats-io/nats.rs/pull/1645
+* @stasimus made their first contribution in https://github.com/nats-io/nats.rs/pull/1616
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.50.0...async-nats/v0.51.0
+
 # v0.50.0
 ## Overview
 

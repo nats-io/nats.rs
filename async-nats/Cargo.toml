@@ -1,7 +1,7 @@
 [package]
 name = "async-nats"
 authors = ["Tomasz Pietrek <tomasz@nats.io>", "Casper Beyer <caspervonb@pm.me>"]
-version = "0.50.0"
+version = "0.51.0"
 edition = "2021"
 rust-version = "1.89.0"
 description = "A async Rust NATS client"
@@ -14,7 +14,7 @@ keywords = ["nats", "client", "messaging", "api"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
-aws-lc-rs = { version = "1.6", optional = true }
+aws-lc-rs = { version = "1.18", optional = true }
 memchr = "2.4"
 bytes = { version = "1.11.1", features = ["serde"] }
 futures-util = { version = "0.3.28", default-features = false, features = ["std", "sink"] }
