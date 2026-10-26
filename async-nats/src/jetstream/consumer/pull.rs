@@ -912,7 +912,8 @@ pub struct Stream {
     heartbeat_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
     started: Option<tokio::sync::oneshot::Sender<()>>,
     /// Set only for [PriorityPolicy::PinnedClient] consumers, so a `Nats-Pin-Id` header stored
-    /// in a message of any other consumer is never sent back.
+    /// in a message of any other consumer is never sent back. The channel holds `None` while the
+    /// stream has no pin.
     #[cfg(feature = "server_2_11")]
     pin_id: Option<tokio::sync::watch::Sender<Option<String>>>,
 }
