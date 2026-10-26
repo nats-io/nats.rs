@@ -105,7 +105,7 @@ async fn subscribe_to_pulls(js: &jetstream::Context, consumer: &str) -> async_na
 
 /// Reads the `id` of the first pull in `pulls`. Polls `messages` meanwhile, so the pull is
 /// re-issued as its expiry ends rather than by the task's fallback timer.
-async fn read_pull_id_while_polling(
+async fn read_first_pull_id(
     mut pulls: impl futures::Stream<Item = async_nats::Message> + Unpin,
     messages: &mut pull::Stream,
 ) -> serde_json::Value {
@@ -194,7 +194,7 @@ async fn pinned_stream_sends_its_pin_with_later_pulls() {
     let mut messages = open_group_stream(&consumer).await;
     let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
 
-    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
+    let id = read_first_pull_id(pulls.skip(1), &mut messages).await;
 
     assert_eq!(id, pin_id.as_str());
 }
@@ -218,7 +218,7 @@ async fn pinned_stream_sends_the_server_pin_over_a_stored_one() {
         .clone()
         .unwrap();
 
-    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
+    let id = read_first_pull_id(pulls.skip(1), &mut messages).await;
 
     assert_eq!(id, pin_id.as_str());
 }
@@ -253,7 +253,7 @@ async fn pinned_stream_sends_its_new_pin_after_unpin() {
     let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
     let pulls = subscribe_to_pulls(&js, "pinned").await;
 
-    let id = read_pull_id_while_polling(pulls, &mut messages).await;
+    let id = read_first_pull_id(pulls, &mut messages).await;
 
     assert_eq!(id, pin_id.as_str());
 }
@@ -305,7 +305,7 @@ async fn stream_of_unpinned_consumer_ignores_stored_pin_id() {
         .unwrap();
     messages.try_next().await.unwrap();
 
-    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
+    let id = read_first_pull_id(pulls.skip(1), &mut messages).await;
 
     assert_eq!(id, serde_json::Value::Null);
 }
