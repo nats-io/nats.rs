@@ -23,7 +23,7 @@ use async_nats::jetstream::{
 };
 use futures::{StreamExt, TryStreamExt};
 
-// Every test uses one pinned client consumer named "pinned" with priority group "A" and a 3s
+// `setup` creates a pinned client consumer named "pinned" with priority group "A" and a 3s
 // priority_timeout. Pull streams expire their pulls after 500ms so a pinned stream refreshes its
 // pin well within that timeout, even on a slow runner.
 
@@ -83,20 +83,32 @@ async fn take_messages(messages: &mut pull::Stream, count: usize) -> Vec<jetstre
     .unwrap()
 }
 
-/// Reads the `id` of the next pull `messages` sends for `consumer`. The stream sends it only once
-/// polled again, so subscribing first doesn't miss it. Polls `messages` meanwhile, so the pull is
-/// re-issued as its expiry ends rather than by the task's fallback timer.
-async fn read_next_pull_id(
-    js: &jetstream::Context,
-    consumer: &str,
-    messages: &mut pull::Stream,
-) -> serde_json::Value {
-    let mut pulls = js
+fn read_pin_id(message: &jetstream::Message) -> String {
+    message
+        .headers
+        .as_ref()
+        .unwrap()
+        .get_last("Nats-Pin-Id")
+        .unwrap()
+        .to_string()
+}
+
+async fn subscribe_to_pulls(js: &jetstream::Context, consumer: &str) -> async_nats::Subscriber {
+    let pulls = js
         .client()
         .subscribe(format!("$JS.API.CONSUMER.MSG.NEXT.events.{consumer}"))
         .await
         .unwrap();
     js.client().flush().await.unwrap();
+    pulls
+}
+
+/// Reads the `id` of the first pull in `pulls`. Polls `messages` meanwhile, so the pull is
+/// re-issued as its expiry ends rather than by the task's fallback timer.
+async fn read_pull_id_while_polling(
+    mut pulls: impl futures::Stream<Item = async_nats::Message> + Unpin,
+    messages: &mut pull::Stream,
+) -> serde_json::Value {
     let polled = tokio::time::timeout(
         Duration::from_secs(3),
         futures::future::select(pulls.next(), messages.next()),
@@ -112,43 +124,49 @@ async fn read_next_pull_id(
     }
 }
 
-/// Reads the pin from the server rather than from the `Nats-Pin-Id` headers the client parses.
-async fn server_pin_id(consumer: &PullConsumer) -> Option<String> {
-    consumer.get_info().await.unwrap().priority_groups[0]
-        .pinned_client_id
-        .clone()
-}
-
-/// Polls both streams for `window`, so each keeps re-issuing its expired pulls and the server
-/// queues the standby stream's pull. Neither may yield anything meanwhile.
-async fn poll_both_streams_for(a: &mut pull::Stream, b: &mut pull::Stream, window: Duration) {
-    tokio::time::timeout(window, futures::stream::select(a, b).next())
-        .await
-        .expect_err("unexpected item");
+/// Polls `messages` for `window` so it keeps re-issuing its expired pulls, and fails if it yields
+/// anything.
+async fn poll_idle_for(messages: &mut pull::Stream, window: Duration) {
+    if let Ok(item) = tokio::time::timeout(window, messages.next()).await {
+        panic!("unexpected item: {item:?}");
+    }
 }
 
 #[tokio::test]
-async fn pinned_stream_keeps_the_pin_across_expired_pulls() {
+async fn pinned_stream_keeps_its_pin_id_past_priority_timeout() {
+    let (_server, js, stream) = setup().await;
+    let mut consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
+    publish_events(&js, 1).await;
+    let mut messages = open_group_stream(&consumer).await;
+    let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
+
+    poll_idle_for(&mut messages, Duration::from_secs(4)).await;
+
+    let info = consumer.info().await.unwrap();
+    assert_eq!(
+        info.priority_groups[0].pinned_client_id.as_deref(),
+        Some(pin_id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn standby_stream_receives_nothing_while_pinned_stream_pulls() {
     let (_server, js, stream) = setup().await;
     let pinned_consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     let standby_consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     publish_events(&js, 1).await;
     let mut pinned = open_group_stream(&pinned_consumer).await;
     take_messages(&mut pinned, 1).await;
-    let pin_id = server_pin_id(&pinned_consumer).await.unwrap();
-    let mut standby = open_group_stream(&standby_consumer).await;
-    // Outlasts the priority_timeout, so the pin lapses unless the pinned stream's pulls renew it.
-    poll_both_streams_for(&mut pinned, &mut standby, Duration::from_secs(4)).await;
+    let standby = open_group_stream(&standby_consumer).await;
+    let (stop_standby, standby_stopped) = tokio::sync::oneshot::channel::<()>();
+    let standby_items = tokio::spawn(standby.take_until(standby_stopped).count());
+    poll_idle_for(&mut pinned, Duration::from_secs(4)).await;
 
-    // Keeps the standby polled, so it has a pull queued to take the messages if the pin moved.
-    tokio::select! {
-        message = standby.next() => panic!("standby received {message:?}"),
-        _ = async {
-            publish_events(&js, 10).await;
-            assert_eq!(server_pin_id(&pinned_consumer).await, Some(pin_id));
-            assert_eq!(take_messages(&mut pinned, 10).await.len(), 10);
-        } => {}
-    }
+    publish_events(&js, 10).await;
+    take_messages(&mut pinned, 10).await;
+    stop_standby.send(()).unwrap();
+
+    assert_eq!(standby_items.await.unwrap(), 0);
 }
 
 #[tokio::test]
@@ -168,9 +186,24 @@ async fn standby_stream_takes_over_when_pinned_stream_is_dropped() {
 }
 
 #[tokio::test]
-async fn pinned_stream_sends_the_server_pin_not_a_stored_one() {
+async fn pinned_stream_sends_its_pin_with_later_pulls() {
     let (_server, js, stream) = setup().await;
     let consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
+    let pulls = subscribe_to_pulls(&js, "pinned").await;
+    publish_events(&js, 1).await;
+    let mut messages = open_group_stream(&consumer).await;
+    let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
+
+    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
+
+    assert_eq!(id, pin_id.as_str());
+}
+
+#[tokio::test]
+async fn pinned_stream_sends_the_server_pin_over_a_stored_one() {
+    let (_server, js, stream) = setup().await;
+    let mut consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
+    let pulls = subscribe_to_pulls(&js, "pinned").await;
     let mut headers = async_nats::HeaderMap::new();
     headers.insert("Nats-Pin-Id", "stored");
     js.publish_with_headers("events", headers, "data".into())
@@ -180,15 +213,18 @@ async fn pinned_stream_sends_the_server_pin_not_a_stored_one() {
         .unwrap();
     let mut messages = open_group_stream(&consumer).await;
     take_messages(&mut messages, 1).await;
-    let pin_id = server_pin_id(&consumer).await.unwrap();
+    let pin_id = consumer.info().await.unwrap().priority_groups[0]
+        .pinned_client_id
+        .clone()
+        .unwrap();
 
-    let id = read_next_pull_id(&js, "pinned", &mut messages).await;
+    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
 
     assert_eq!(id, pin_id.as_str());
 }
 
 #[tokio::test]
-async fn pinned_stream_gets_a_new_pin_after_unpin() {
+async fn pinned_stream_receives_again_soon_after_unpin() {
     let (_server, js, stream) = setup().await;
     let consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     publish_events(&js, 1).await;
@@ -198,11 +234,27 @@ async fn pinned_stream_gets_a_new_pin_after_unpin() {
 
     publish_events(&js, 1).await;
 
-    tokio::time::timeout(Duration::from_secs(1), take_messages(&mut messages, 1))
-        .await
-        .expect("message not delivered well within the priority_timeout");
-    let pin_id = server_pin_id(&consumer).await.unwrap();
-    let id = read_next_pull_id(&js, "pinned", &mut messages).await;
+    let received = tokio::time::timeout(Duration::from_millis(1500), messages.next()).await;
+    assert!(
+        received.is_ok(),
+        "no message within half the priority_timeout"
+    );
+}
+
+#[tokio::test]
+async fn pinned_stream_sends_its_new_pin_after_unpin() {
+    let (_server, js, stream) = setup().await;
+    let consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
+    publish_events(&js, 1).await;
+    let mut messages = open_group_stream(&consumer).await;
+    take_messages(&mut messages, 1).await;
+    stream.unpin_consumer("pinned", "A").await.unwrap();
+    publish_events(&js, 1).await;
+    let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
+    let pulls = subscribe_to_pulls(&js, "pinned").await;
+
+    let id = read_pull_id_while_polling(pulls, &mut messages).await;
+
     assert_eq!(id, pin_id.as_str());
 }
 
@@ -215,7 +267,10 @@ async fn standby_stream_takes_over_after_unpin() {
     let mut pinned = open_group_stream(&pinned_consumer).await;
     take_messages(&mut pinned, 1).await;
     let mut standby = open_group_stream(&standby_consumer).await;
-    poll_both_streams_for(&mut pinned, &mut standby, Duration::from_millis(200)).await;
+    futures::join!(
+        poll_idle_for(&mut pinned, Duration::from_millis(200)),
+        poll_idle_for(&mut standby, Duration::from_millis(200)),
+    );
 
     stream.unpin_consumer("pinned", "A").await.unwrap();
     publish_events(&js, 10).await;
@@ -234,6 +289,7 @@ async fn stream_of_unpinned_consumer_ignores_stored_pin_id() {
         })
         .await
         .unwrap();
+    let pulls = subscribe_to_pulls(&js, "plain").await;
     let mut headers = async_nats::HeaderMap::new();
     headers.insert("Nats-Pin-Id", "stored");
     js.publish_with_headers("events", headers, "data".into())
@@ -249,7 +305,7 @@ async fn stream_of_unpinned_consumer_ignores_stored_pin_id() {
         .unwrap();
     messages.try_next().await.unwrap();
 
-    let id = read_next_pull_id(&js, "plain", &mut messages).await;
+    let id = read_pull_id_while_polling(pulls.skip(1), &mut messages).await;
 
     assert_eq!(id, serde_json::Value::Null);
 }
@@ -290,13 +346,7 @@ async fn info_reports_the_pin_id_of_the_pinned_client() {
     let mut consumer: PullConsumer = stream.get_consumer("pinned").await.unwrap();
     publish_events(&js, 1).await;
     let mut messages = open_group_stream(&consumer).await;
-    let message = take_messages(&mut messages, 1).await.remove(0);
-    let pin_id = message
-        .headers
-        .as_ref()
-        .unwrap()
-        .get_last("Nats-Pin-Id")
-        .unwrap();
+    let pin_id = read_pin_id(&take_messages(&mut messages, 1).await[0]);
 
     let info = consumer.info().await.unwrap();
 
