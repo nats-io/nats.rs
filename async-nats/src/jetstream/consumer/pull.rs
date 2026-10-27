@@ -41,7 +41,7 @@ use crate::subject::Subject;
 use super::PriorityPolicy;
 
 use super::{
-    backoff, poll_missed_heartbeat, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
+    poll_missed_heartbeat, retry, AckPolicy, Consumer, DeliverPolicy, FromConsumer,
     IntoConsumerConfig, ReplayPolicy, StreamError, StreamErrorKind,
 };
 use jetstream::consumer;
@@ -860,7 +860,7 @@ impl futures_util::Stream for Ordered {
                 let stream_name = self.stream_name.clone();
                 let sequence = self.stream_sequence;
                 async move {
-                    tryhard::retry_fn(|| {
+                    retry(u32::MAX, || {
                         recreate_consumer_stream(
                             &context,
                             &config,
@@ -869,8 +869,6 @@ impl futures_util::Stream for Ordered {
                             sequence,
                         )
                     })
-                    .retries(u32::MAX)
-                    .custom_backoff(backoff)
                     .await
                 }
             }))
@@ -987,8 +985,7 @@ impl Stream {
                                 }
                             debug!("detected !Connected -> Connected state change");
 
-                            match tryhard::retry_fn(|| consumer.get_info())
-                                .retries(5).custom_backoff(backoff).await
+                            match retry(5, || consumer.get_info()).await
                                 .map_err(|err| crate::RequestError::with_source(crate::RequestErrorKind::Other, err).into()) {
                                     Ok(info) => {
                                         if info.num_waiting == 0 {
