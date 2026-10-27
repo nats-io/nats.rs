@@ -39,6 +39,20 @@ use tokio_util::sync::PollSender;
 static VERSION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
 
+/// Parses the leading `major.minor.patch` of a server version string, such as `2.11.4` or
+/// `v2.10.0-beta.1`. Missing minor or patch components default to zero. Returns `None` if the
+/// string does not start with a numeric version or a component does not fit in an `i64`.
+fn parse_server_version(version: &str) -> Option<(i64, i64, i64)> {
+    let captures = VERSION_RE.captures(version)?;
+    let component = |index: usize| -> Option<i64> {
+        match captures.get(index) {
+            Some(m) => m.as_str().parse::<i64>().ok(),
+            None => Some(0),
+        }
+    };
+    Some((component(1)?, component(2)?, component(3)?))
+}
+
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
 pub type PublishError = Error<PublishErrorKind>;
@@ -401,25 +415,12 @@ impl Client {
     pub fn is_server_compatible(&self, major: i64, minor: i64, patch: i64) -> bool {
         let info = self.server_info();
 
-        let server_version_captures = match VERSION_RE.captures(&info.version) {
-            Some(captures) => captures,
-            None => return false,
+        // The version string is supplied by the server. Treat anything unparsable as
+        // incompatible rather than panicking.
+        let Some((server_major, server_minor, server_patch)) = parse_server_version(&info.version)
+        else {
+            return false;
         };
-
-        let server_major = server_version_captures
-            .get(1)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
-
-        let server_minor = server_version_captures
-            .get(2)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
-
-        let server_patch = server_version_captures
-            .get(3)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
 
         if server_major < major
             || (server_major == major && server_minor < minor)
@@ -1345,4 +1346,44 @@ pub struct Statistics {
     /// Number of times connection was established.
     /// Initial connect will be counted as well, then all successful reconnects.
     pub connects: AtomicU64,
+}
+
+#[cfg(test)]
+mod server_version_tests {
+    use super::parse_server_version;
+
+    #[test]
+    fn parses_common_formats() {
+        assert_eq!(parse_server_version("2.11.4"), Some((2, 11, 4)));
+        assert_eq!(parse_server_version("v2.10.0"), Some((2, 10, 0)));
+        assert_eq!(parse_server_version("2.12.0-beta.1"), Some((2, 12, 0)));
+    }
+
+    #[test]
+    fn missing_components_default_to_zero() {
+        // These used to panic on `unwrap` of an absent capture group.
+        assert_eq!(parse_server_version("2"), Some((2, 0, 0)));
+        assert_eq!(parse_server_version("2.11"), Some((2, 11, 0)));
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert_eq!(parse_server_version(""), None);
+        assert_eq!(parse_server_version("dev"), None);
+        assert_eq!(parse_server_version("v"), None);
+        assert_eq!(parse_server_version(".5"), None);
+        assert_eq!(parse_server_version("-2.5.0"), None);
+        // This used to panic on integer overflow while parsing the component.
+        assert_eq!(parse_server_version("99999999999999999999.0.0"), None);
+    }
+
+    #[test]
+    fn parses_leading_numeric_prefix_only() {
+        // Only the leading `major[.minor[.patch]]` run is considered; anything that breaks
+        // the pattern ends the version, it is never parsed as a negative component.
+        assert_eq!(parse_server_version("2."), Some((2, 0, 0)));
+        assert_eq!(parse_server_version("02.005.0007"), Some((2, 5, 7)));
+        assert_eq!(parse_server_version("2.-5.0"), Some((2, 0, 0)));
+        assert_eq!(parse_server_version("2.5.-1"), Some((2, 5, 0)));
+    }
 }
