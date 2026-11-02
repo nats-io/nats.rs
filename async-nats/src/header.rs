@@ -291,8 +291,8 @@ impl HeaderMap {
 /// Represents NATS header field value.
 ///
 /// A header value cannot span lines. [`HeaderMap::insert`], [`HeaderMap::append`] and
-/// [`HeaderValue::from_lossy`] replace each `\r` and `\n` in a string with a space, and
-/// [`str::parse`] refuses a string holding them.
+/// [`HeaderValue::from_lossy`] replace each `\r` and `\n` in a string with a space, while
+/// [`HeaderValue::try_from`] and [`str::parse`] refuse a string holding them.
 ///
 /// # Examples
 ///
@@ -402,25 +402,32 @@ impl FromStr for HeaderValue {
     }
 }
 
-impl From<&str> for HeaderValue {
-    fn from(v: &str) -> Self {
-        assert!(
-            validate_header_value(v).is_ok(),
-            "invalid header value: cannot contain '\\r' or '\\n'"
-        );
-        Self {
-            inner: v.to_string(),
-        }
+/// Fallible conversion from a borrowed string slice; refuses a value holding `\r` or `\n`.
+impl TryFrom<&str> for HeaderValue {
+    type Error = ParseHeaderValueError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
-impl From<String> for HeaderValue {
-    fn from(inner: String) -> Self {
-        assert!(
-            validate_header_value(&inner).is_ok(),
-            "invalid header value: cannot contain '\\r' or '\\n'"
-        );
-        Self { inner }
+/// Fallible conversion from a borrowed `String`; refuses a value holding `\r` or `\n`.
+impl TryFrom<&String> for HeaderValue {
+    type Error = ParseHeaderValueError;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+/// Fallible conversion from an owned `String`; refuses a value holding `\r` or `\n` and
+/// reuses the string's allocation otherwise.
+impl TryFrom<String> for HeaderValue {
+    type Error = ParseHeaderValueError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        validate_header_value(&value)?;
+        Ok(Self { inner: value })
     }
 }
 
@@ -430,7 +437,8 @@ impl HeaderValue {
     }
 
     /// Creates a header value, replacing each `\r` and `\n` with a space, as a header value
-    /// cannot hold them. Use [`str::parse`] to refuse such a value instead.
+    /// cannot hold them. Use [`HeaderValue::try_from`] or [`str::parse`] to refuse such a value
+    /// instead.
     ///
     /// # Examples
     ///
@@ -457,7 +465,8 @@ impl HeaderValue {
     }
 }
 
-#[derive(Debug, Clone)]
+/// The error returned when a string cannot be a [`HeaderValue`] because it holds `\r` or `\n`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseHeaderValueError;
 
 impl fmt::Display for ParseHeaderValueError {
@@ -861,7 +870,9 @@ impl<'de> Deserialize<'de> for HeaderName {
     }
 }
 
-#[derive(Debug, Clone)]
+/// The error returned when a string cannot be a [`HeaderName`] because it holds a character
+/// other than visible ASCII, or a `:`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseHeaderNameError;
 
 impl std::fmt::Display for ParseHeaderNameError {
@@ -882,7 +893,10 @@ fn validate_header_name(s: &str) -> Result<(), ParseHeaderNameError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HeaderMap, HeaderName, HeaderValue, IntoHeaderName, IntoHeaderValue};
+    use super::{
+        HeaderMap, HeaderName, HeaderValue, IntoHeaderName, IntoHeaderValue, ParseHeaderNameError,
+        ParseHeaderValueError,
+    };
     use std::str::{from_utf8, FromStr};
 
     #[test]
@@ -1078,10 +1092,10 @@ mod tests {
     }
 
     #[test]
-    fn header_value_from_string() {
+    fn header_value_try_from_string() {
         let string = "some value".to_string();
 
-        let value: HeaderValue = string.into();
+        let value = HeaderValue::try_from(string).unwrap();
 
         assert_eq!("some value", value.as_str());
     }
@@ -1201,24 +1215,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid header value")]
-    fn header_value_from_str_rejects_cr() {
-        let _: HeaderValue = "value\rwith\rcr".into();
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid header value")]
-    fn header_value_from_str_rejects_lf() {
-        let _: HeaderValue = "value\nwith\nlf".into();
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid header value")]
-    fn header_value_from_string_rejects_crlf() {
-        let _: HeaderValue = "injected\r\nPUB attack 0\r\n\r\n".to_string().into();
-    }
-
-    #[test]
     fn header_map_insert_replaces_line_breaks() {
         let mut headers = HeaderMap::new();
         headers.insert("Key", "value\r\nPUB attack 0\r\n\r\n");
@@ -1235,6 +1231,18 @@ mod tests {
     fn header_value_from_lossy_replaces_line_breaks() {
         assert_eq!(HeaderValue::from_lossy("a\r\nb").as_str(), "a  b");
         assert_eq!(HeaderValue::from_lossy("plain").as_str(), "plain");
+    }
+
+    #[test]
+    fn header_value_try_from_rejects_line_breaks() {
+        assert!(HeaderValue::try_from("value\rwith\rcr").is_err());
+        assert!(HeaderValue::try_from("value\nwith\nlf").is_err());
+        assert!(HeaderValue::try_from("injected\r\nPUB attack 0\r\n\r\n".to_string()).is_err());
+        assert_eq!(HeaderValue::try_from("value").unwrap().as_str(), "value");
+        assert_eq!(
+            HeaderValue::try_from("value".to_string()).unwrap().as_str(),
+            "value"
+        );
     }
 
     #[test]
@@ -1273,11 +1281,24 @@ mod tests {
     }
 
     #[test]
+    fn header_value_try_from_string_ref() {
+        let value = String::from("value");
+        assert_eq!(HeaderValue::try_from(&value).unwrap().as_str(), "value");
+        assert!(HeaderValue::try_from(&String::from("a\nb")).is_err());
+    }
+
+    #[test]
+    fn parse_errors_are_comparable() {
+        assert_eq!(HeaderValue::try_from("a\nb"), Err(ParseHeaderValueError));
+        assert_eq!(HeaderName::try_from("Bad Name"), Err(ParseHeaderNameError));
+    }
+
+    #[test]
     fn valid_header_values_still_work() {
-        let _: HeaderValue = "normal value".into();
-        let _: HeaderValue = "value with special chars !@#$%^&*()".into();
-        let _: HeaderValue = "".into();
-        let _: HeaderValue = String::from("string value").into();
+        HeaderValue::try_from("normal value").unwrap();
+        HeaderValue::try_from("value with special chars !@#$%^&*()").unwrap();
+        HeaderValue::try_from("").unwrap();
+        HeaderValue::try_from(String::from("string value")).unwrap();
     }
 
     #[test]
