@@ -322,6 +322,45 @@ mod service {
     }
 
     #[tokio::test]
+    async fn respond_error_with_line_breaks() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("serviceA", "1.0.0")
+            .await
+            .unwrap();
+        let mut endpoint = service.endpoint("products").await.unwrap();
+        let reply = client.new_inbox();
+        let mut response = client.subscribe(reply.to_owned()).await.unwrap();
+        client
+            .publish_with_reply("products", reply, "data".into())
+            .await
+            .unwrap();
+
+        let request = endpoint.next().await.unwrap();
+        request
+            .respond(Err(async_nats::service::error::Error {
+                code: 400,
+                status: "bad\r\nX-Injected: yes".into(),
+            }))
+            .await
+            .unwrap();
+
+        // line breaks become spaces, as nats.go does, so they cannot start a new header.
+        let headers = response.next().await.unwrap().headers.unwrap();
+        assert_eq!(
+            headers
+                .get(async_nats::service::NATS_SERVICE_ERROR)
+                .unwrap()
+                .as_str(),
+            "bad  X-Injected: yes"
+        );
+        assert!(headers.get("X-Injected").is_none());
+    }
+
+    #[tokio::test]
     async fn custom_queue_groups() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();

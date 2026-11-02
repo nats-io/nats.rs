@@ -171,6 +171,9 @@ impl HeaderMap {
 impl HeaderMap {
     /// Inserts a new value to a [HeaderMap].
     ///
+    /// A string value has each `\r` and `\n` replaced with a space, see
+    /// [`HeaderValue::from_lossy`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -186,6 +189,9 @@ impl HeaderMap {
 
     /// Appends a new value to the list of values to a given key.
     /// If the key did not exist, it will be inserted with provided value.
+    ///
+    /// A string value has each `\r` and `\n` replaced with a space, see
+    /// [`HeaderValue::from_lossy`].
     ///
     /// # Examples
     ///
@@ -283,6 +289,10 @@ impl HeaderMap {
 }
 
 /// Represents NATS header field value.
+///
+/// A header value cannot span lines. [`HeaderMap::insert`], [`HeaderMap::append`] and
+/// [`HeaderValue::from_lossy`] replace each `\r` and `\n` in a string with a space, and
+/// [`str::parse`] refuses a string holding them.
 ///
 /// # Examples
 ///
@@ -419,6 +429,29 @@ impl HeaderValue {
         HeaderValue::default()
     }
 
+    /// Creates a header value, replacing each `\r` and `\n` with a space, as a header value
+    /// cannot hold them. Use [`str::parse`] to refuse such a value instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use async_nats::HeaderValue;
+    ///
+    /// let value = HeaderValue::from_lossy("first\nsecond");
+    /// assert_eq!(value.as_str(), "first second");
+    /// ```
+    pub fn from_lossy(value: &str) -> Self {
+        if value.contains(['\r', '\n']) {
+            Self {
+                inner: value.replace(['\r', '\n'], " "),
+            }
+        } else {
+            Self {
+                inner: value.to_string(),
+            }
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         self.inner.as_str()
     }
@@ -490,19 +523,25 @@ impl IntoHeaderName for HeaderName {
     }
 }
 
+/// Converts a value into a [`HeaderValue`]. Strings are converted with
+/// [`HeaderValue::from_lossy`], so each `\r` and `\n` becomes a space.
 pub trait IntoHeaderValue {
     fn into_header_value(self) -> HeaderValue;
 }
 
 impl IntoHeaderValue for &str {
     fn into_header_value(self) -> HeaderValue {
-        HeaderValue::from(self)
+        HeaderValue::from_lossy(self)
     }
 }
 
 impl IntoHeaderValue for String {
     fn into_header_value(self) -> HeaderValue {
-        HeaderValue::from(self)
+        if self.contains(['\r', '\n']) {
+            HeaderValue::from_lossy(&self)
+        } else {
+            HeaderValue { inner: self }
+        }
     }
 }
 
@@ -1180,10 +1219,22 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid header value")]
-    fn header_value_into_trait_rejects_crlf() {
+    fn header_map_insert_replaces_line_breaks() {
         let mut headers = HeaderMap::new();
         headers.insert("Key", "value\r\nPUB attack 0\r\n\r\n");
+        headers.append("Other", "a\rb\nc".to_string());
+
+        assert_eq!(
+            headers.get("Key").unwrap().as_str(),
+            "value  PUB attack 0    "
+        );
+        assert_eq!(headers.get("Other").unwrap().as_str(), "a b c");
+    }
+
+    #[test]
+    fn header_value_from_lossy_replaces_line_breaks() {
+        assert_eq!(HeaderValue::from_lossy("a\r\nb").as_str(), "a  b");
+        assert_eq!(HeaderValue::from_lossy("plain").as_str(), "plain");
     }
 
     #[test]
