@@ -1335,7 +1335,11 @@ pub struct Config {
     pub compression: Option<Compression>,
     #[cfg(feature = "server_2_10")]
     /// Set limits on consumers that are created on this stream.
-    #[serde(default, deserialize_with = "default_consumer_limits_as_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "default_consumer_limits_as_none"
+    )]
     pub consumer_limits: Option<ConsumerLimits>,
 
     #[cfg(feature = "server_2_10")]
@@ -2946,6 +2950,13 @@ mod tests {
             serde_json::from_str(&ser).unwrap()
         };
         assert_eq!(config, roundtrip);
+    }
+
+    #[test]
+    fn consumer_limits_omitted_when_none() {
+        let config = serde_json::to_value(Config::default()).unwrap();
+
+        assert_eq!(config.get("consumer_limits"), None);
     }
 
     #[test]
