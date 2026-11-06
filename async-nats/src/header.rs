@@ -432,6 +432,13 @@ impl TryFrom<String> for HeaderValue {
 }
 
 impl HeaderValue {
+    /// Like `From<String>`, but reports invalid values instead of panicking, and unlike
+    /// `FromStr` it reuses the allocation.
+    pub(crate) fn from_string(inner: String) -> Result<Self, ParseHeaderValueError> {
+        validate_header_value(&inner)?;
+        Ok(Self { inner })
+    }
+
     pub fn new() -> Self {
         HeaderValue::default()
     }
