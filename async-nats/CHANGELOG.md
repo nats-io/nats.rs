@@ -1,3 +1,29 @@
+# v0.52.0
+## Overview
+
+This release fixes panics on line breaks in header values. A `\r` inside a received header value panicked the connection task, so any client allowed to publish on a subject could stop its subscribers' connections. Upgrading is recommended.
+
+It is a minor release because `HeaderValue` no longer implements `From<&str>` and `From<String>`.
+
+## Fixed
+* Fix panic on line breaks in header values by @Jarema in https://github.com/nats-io/nats.rs/pull/1673
+
+## Breaking changes
+* `HeaderValue` no longer implements `From<&str>` and `From<String>`. It implements `TryFrom<&str>`, `TryFrom<&String>` and `TryFrom<String>` instead, returning `ParseHeaderValueError` for a value with `\r` or `\n` (#1673). Affected code fails to compile:
+  * `headers.insert(k, HeaderValue::from(s))` → `headers.insert(k, s)`
+  * `HeaderValue::from(s)`, `s.into()` → `HeaderValue::try_from(s)?` to reject line breaks, `HeaderValue::from_lossy(s)` to replace them
+  * `T: Into<HeaderValue>` → `T: IntoHeaderValue`
+  * `let Ok(v) = HeaderValue::try_from(s)` → handle `ParseHeaderValueError`, the error is no longer `Infallible`
+
+  String and integer values passed straight to `insert` or `append`, and `str::parse`, keep working.
+
+## Behaviour changes
+* A string header value with `\r` or `\n` gets a space in place of each instead of panicking. This covers `HeaderMap::insert` and `append`, `PublishMessage::header`, `message_id` and `expected_*`, service `respond(Err(..))` and received messages. To reject such a value, convert it with `HeaderValue::try_from` first (#1673).
+* `Stream::get_raw_message`, `get_last_raw_message_by_subject` and KV `entry` without direct get no longer fail on such a header value; they replace the line breaks the same way (#1673).
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.51.0...async-nats/v0.52.0
+
+
 # v0.51.0
 ## Overview
 
