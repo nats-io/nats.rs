@@ -752,7 +752,7 @@ impl Store {
                 _ => WatchError::with_source(WatchErrorKind::Other, err),
             })?;
 
-        let seen_current = consumer.cached_info().num_pending == 0;
+        let initial_num_pending = consumer.cached_info().num_pending;
 
         Ok(Watch {
             subscription: consumer.messages().await.map_err(|err| match err.kind() {
@@ -765,7 +765,8 @@ impl Store {
             })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
-            seen_current,
+            seen_current: initial_num_pending == 0,
+            initial_num_pending,
         })
     }
 
@@ -795,7 +796,7 @@ impl Store {
                 _ => WatchError::with_source(WatchErrorKind::Other, err),
             })?;
 
-        let seen_current = consumer.cached_info().num_pending == 0;
+        let initial_num_pending = consumer.cached_info().num_pending;
 
         Ok(Watch {
             subscription: consumer.messages().await.map_err(|err| match err.kind() {
@@ -808,7 +809,8 @@ impl Store {
             })?,
             prefix: self.prefix.clone(),
             bucket: self.name.clone(),
-            seen_current,
+            seen_current: initial_num_pending == 0,
+            initial_num_pending,
         })
     }
 
@@ -1371,9 +1373,23 @@ impl Store {
 /// A structure representing a watch on a key-value bucket, yielding values whenever there are changes.
 pub struct Watch {
     seen_current: bool,
+    initial_num_pending: u64,
     subscription: super::consumer::push::Ordered,
     prefix: String,
     bucket: String,
+}
+
+impl Watch {
+    /// Number of messages pending on the underlying consumer when this watch was created:
+    /// how many entries (including delete and purge markers) matched the watch's keys and
+    /// deliver policy at that moment.
+    ///
+    /// `0` means the watch started caught up and only live updates follow, which is always
+    /// the case for [Store::watch] and [Store::watch_all]. The value is fixed at creation; it
+    /// does not change as entries are consumed or new ones are written.
+    pub fn initial_num_pending(&self) -> u64 {
+        self.initial_num_pending
+    }
 }
 
 impl futures_util::Stream for Watch {

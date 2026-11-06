@@ -803,6 +803,92 @@ mod kv {
     }
 
     #[tokio::test]
+    async fn watch_initial_num_pending() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let context = async_nats::jetstream::new(client);
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let watch = kv.watch_with_history(">").await.unwrap();
+        assert_eq!(watch.initial_num_pending(), 0);
+
+        kv.put("foo", "1".into()).await.unwrap();
+        kv.put("foo", "2".into()).await.unwrap();
+        kv.put("bar", "1".into()).await.unwrap();
+        kv.delete("bar").await.unwrap();
+
+        // Counts the last entry per key, delete markers included.
+        let mut watch = kv.watch_with_history(">").await.unwrap();
+        assert_eq!(watch.initial_num_pending(), 2);
+
+        // Does not change with writes after the watch was created.
+        kv.put("baz", "1".into()).await.unwrap();
+        for (key, operation) in [
+            ("foo", Operation::Put),
+            ("bar", Operation::Delete),
+            ("baz", Operation::Put),
+        ] {
+            let entry = watch.next().await.unwrap().unwrap();
+            assert_eq!(entry.key, key);
+            assert_eq!(entry.operation, operation);
+            assert_eq!(watch.initial_num_pending(), 2);
+        }
+
+        assert_eq!(
+            kv.watch_all_from_revision(1)
+                .await
+                .unwrap()
+                .initial_num_pending(),
+            5
+        );
+        assert_eq!(kv.watch_all().await.unwrap().initial_num_pending(), 0);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "server_2_10")]
+    async fn watch_many_initial_num_pending() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let context = async_nats::jetstream::new(client);
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "history".into(),
+                description: "test_description".into(),
+                history: 15,
+                storage: StorageType::File,
+                num_replicas: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        kv.put("foo.1", "1".into()).await.unwrap();
+        kv.put("foo.1", "2".into()).await.unwrap();
+        kv.put("bar.1", "1".into()).await.unwrap();
+        kv.put("baz.1", "1".into()).await.unwrap();
+
+        let watch = kv
+            .watch_many_with_history(["foo.>", "bar.>"])
+            .await
+            .unwrap();
+        assert_eq!(watch.initial_num_pending(), 2);
+        let watch = kv.watch_many(["foo.>", "bar.>"]).await.unwrap();
+        assert_eq!(watch.initial_num_pending(), 0);
+    }
+
+    #[tokio::test]
     async fn watch_with_history() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
