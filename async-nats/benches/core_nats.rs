@@ -67,6 +67,47 @@ pub fn publish(c: &mut Criterion) {
     messages_group.finish();
 }
 
+pub fn publish_with_headers(c: &mut Criterion) {
+    let messages_per_iter = 500_000;
+    let server = nats_server::run_basic_server();
+    let mut messages_group = c.benchmark_group("nats::publish_with_headers_amount");
+    messages_group.sample_size(10);
+    messages_group.warm_up_time(std::time::Duration::from_secs(1));
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("Nats-Bench-Identity", "group.client");
+    headers.insert("Nats-Bench-Lease", "target.capability.42");
+    headers.insert("Nats-Bench-Sequence", "1234567");
+
+    for &size in [32, 1024, 8192].iter() {
+        messages_group.throughput(criterion::Throughput::Elements(messages_per_iter));
+        messages_group.bench_with_input(
+            criterion::BenchmarkId::from_parameter(size),
+            &size,
+            |b, _| {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let nc =
+                    rt.block_on(async { async_nats::connect(server.client_url()).await.unwrap() });
+
+                b.to_async(rt).iter_with_large_drop(|| {
+                    let nc = nc.clone();
+                    let headers = headers.clone();
+                    async move {
+                        publish_messages_with_headers(
+                            nc,
+                            headers,
+                            Bytes::from_static(&MSG[..size]),
+                            messages_per_iter,
+                        )
+                        .await
+                    }
+                });
+            },
+        );
+    }
+    messages_group.finish();
+}
+
 pub fn subscribe(c: &mut Criterion) {
     let server = nats_server::run_basic_server();
     let messages_per_iter = 500_000;
@@ -188,6 +229,19 @@ async fn publish_messages(nc: async_nats::Client, msg: Bytes, amount: u64) {
     }
 }
 
+async fn publish_messages_with_headers(
+    nc: async_nats::Client,
+    headers: async_nats::HeaderMap,
+    msg: Bytes,
+    amount: u64,
+) {
+    for _i in 0..amount {
+        nc.publish_with_headers("bench", headers.clone(), msg.clone())
+            .await
+            .unwrap();
+    }
+}
+
 async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
     let mut sub = nc.subscribe("bench").await.unwrap();
     for _ in 0..amount {
@@ -195,4 +249,4 @@ async fn subscribe_messages(nc: async_nats::Client, amount: u64) {
     }
 }
 
-criterion_group!(core_nats, publish, subscribe, request);
+criterion_group!(core_nats, publish, publish_with_headers, subscribe, request);
