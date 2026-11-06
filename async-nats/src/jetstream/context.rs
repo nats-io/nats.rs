@@ -1961,10 +1961,10 @@ impl PublishAckFuture {
                             PublishErrorKind::WrongLastMessageId,
                             error,
                         )),
-                        ErrorCode::STREAM_WRONG_LAST_SEQUENCE => Err(PublishError::with_source(
-                            PublishErrorKind::WrongLastSequence,
-                            error,
-                        )),
+                        ErrorCode::STREAM_WRONG_LAST_SEQUENCE
+                        | ErrorCode::STREAM_WRONG_LAST_SEQUENCE_CONSTANT => Err(
+                            PublishError::with_source(PublishErrorKind::WrongLastSequence, error),
+                        ),
                         _ => Err(PublishError::with_source(PublishErrorKind::Other, error)),
                     },
                     Response::Ok(publish_ack) => Ok(publish_ack),
@@ -2670,4 +2670,46 @@ fn kv_to_stream_config(
         subject_delete_marker_ttl,
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn wrong_last_sequence_codes_are_classified_and_preserve_source() {
+    use std::error::Error as _;
+    for (code, kind) in [
+        (10071, PublishErrorKind::WrongLastSequence),
+        (10164, PublishErrorKind::WrongLastSequence),
+        (10070, PublishErrorKind::WrongLastMessageId),
+        (99999, PublishErrorKind::Other),
+    ] {
+        let payload =
+            format!(r#"{{"error":{{"code":400,"err_code":{code},"description":"test"}}}}"#);
+        let (sender, receiver) = oneshot::channel();
+        sender
+            .send(Message {
+                subject: "test".into(),
+                reply: None,
+                payload: payload.into(),
+                headers: None,
+                status: None,
+                description: None,
+                length: 0,
+            })
+            .unwrap();
+        let (tx, _rx) = mpsc::channel(1);
+        let future = PublishAckFuture {
+            timeout: Duration::from_secs(1),
+            subscription: Some(receiver),
+            permit: None,
+            tx,
+        };
+        let error = future.next_with_timeout().await.unwrap_err();
+        assert_eq!(error.kind(), kind);
+        let source = error
+            .source()
+            .unwrap()
+            .downcast_ref::<crate::jetstream::Error>()
+            .unwrap();
+        assert_eq!(source.error_code(), ErrorCode(code));
+    }
 }
