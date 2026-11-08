@@ -327,7 +327,7 @@ impl Store {
                 revision,
                 ..
             }) => {
-                let revision = self.update(key, value, revision).await?;
+                let revision = self.update_maybe_ttl(key, value, revision, ttl).await?;
                 Ok(revision)
             }
 
