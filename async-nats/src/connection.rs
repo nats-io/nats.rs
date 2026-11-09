@@ -966,6 +966,24 @@ mod read_op {
     }
 
     #[tokio::test]
+    async fn message_header_value_with_carriage_return() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server
+            .write_all(b"HMSG FOO.BAR 10 25 36\r\nNATS/1.0\r\nHeader: a\rb\r\n\r\nHello World\r\n")
+            .await
+            .unwrap();
+
+        let result = connection.read_op().await.unwrap();
+
+        let Some(ServerOp::Message { headers, .. }) = result else {
+            panic!("expected a message, got {result:?}");
+        };
+        assert_eq!(headers.unwrap().get("Header").unwrap().as_str(), "a b");
+    }
+
+    #[tokio::test]
     async fn message() {
         let (stream, mut server) = io::duplex(128);
         let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));

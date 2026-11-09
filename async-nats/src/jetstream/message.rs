@@ -86,6 +86,7 @@ impl PublishMessage {
         self
     }
     /// A shorthand to add a single header.
+    /// A string value has each `\r` and `\n` replaced with a space, see [`HeaderMap::insert`].
     pub fn header<N: IntoHeaderName, V: IntoHeaderValue>(mut self, name: N, value: V) -> Self {
         self.headers
             .get_or_insert(header::HeaderMap::new())
@@ -93,11 +94,13 @@ impl PublishMessage {
         self
     }
     /// Sets the `Nats-Msg-Id` header, that is used by stream deduplicate window.
+    /// Each `\r` and `\n` in the ID is replaced with a space.
     pub fn message_id<T: AsRef<str>>(self, id: T) -> Self {
         self.header(header::NATS_MESSAGE_ID, id.as_ref())
     }
     /// Sets expected last message ID.
     /// It sets the `Nats-Expected-Last-Msg-Id` header with provided value.
+    /// Each `\r` and `\n` in the ID is replaced with a space.
     pub fn expected_last_message_id<T: AsRef<str>>(self, last_message_id: T) -> Self {
         self.header(
             header::NATS_EXPECTED_LAST_MESSAGE_ID,
@@ -122,11 +125,9 @@ impl PublishMessage {
     }
     /// Sets the expected stream name.
     /// It sets the `Nats-Expected-Stream` header with provided value.
+    /// Each `\r` and `\n` in the name is replaced with a space.
     pub fn expected_stream<T: AsRef<str>>(self, stream: T) -> Self {
-        self.header(
-            header::NATS_EXPECTED_STREAM,
-            HeaderValue::from(stream.as_ref()),
-        )
+        self.header(header::NATS_EXPECTED_STREAM, stream.as_ref())
     }
 
     #[cfg(feature = "server_2_11")]
@@ -838,9 +839,21 @@ pub struct Info<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_info;
+    use super::{parse_info, PublishMessage};
+    use crate::header::NATS_EXPECTED_STREAM;
 
     const TS: &str = "1790230470084404000";
+
+    #[test]
+    fn expected_stream_replaces_line_breaks() {
+        let message = PublishMessage::build().expected_stream("events\r\nX-Injected: yes");
+
+        let headers = message.headers.unwrap();
+        assert_eq!(
+            headers.get(NATS_EXPECTED_STREAM).unwrap().as_str(),
+            "events  X-Injected: yes"
+        );
+    }
 
     #[test]
     fn parses_v1_nine_token_reply() {

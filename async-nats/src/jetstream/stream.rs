@@ -17,7 +17,6 @@ use std::{
     collections::{self, HashMap},
     fmt::{self, Debug, Display},
     future::IntoFuture,
-    io::{self},
     pin::Pin,
     str::FromStr,
     task::Poll,
@@ -25,9 +24,7 @@ use std::{
 };
 
 use crate::datetime::{rfc3339, DateTime};
-use crate::{
-    error::Error, header::HeaderName, is_valid_subject, HeaderMap, HeaderValue, StatusCode,
-};
+use crate::{error::Error, header::HeaderName, is_valid_subject, HeaderMap, StatusCode};
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
 use bytes::Bytes;
@@ -1882,10 +1879,7 @@ fn parse_headers(
                 s.push_str(v.trim());
             }
 
-            headers.insert(
-                HeaderName::from_str(k)?,
-                HeaderValue::from_str(&s).map_err(|err| Box::new(io::Error::other(err)))?,
-            );
+            headers.insert(HeaderName::from_str(k)?, s);
         } else {
             return Err(Box::new(std::io::Error::other("malformed header line")));
         }
@@ -2952,5 +2946,20 @@ mod tests {
             serde_json::from_str(&ser).unwrap()
         };
         assert_eq!(config, roundtrip);
+    }
+
+    #[test]
+    fn raw_message_header_value_with_carriage_return() {
+        let raw: RawMessage = serde_json::from_value(serde_json::json!({
+            "subject": "events",
+            "seq": 1,
+            "hdrs": STANDARD.encode("NATS/1.0\r\nHeader: a\rb\r\n\r\n"),
+            "time": "2026-11-02T00:00:00Z",
+        }))
+        .unwrap();
+
+        let message = StreamMessage::try_from(raw).unwrap();
+
+        assert_eq!(message.headers.get("Header").unwrap().as_str(), "a b");
     }
 }

@@ -1218,8 +1218,8 @@ impl Store {
         subject.push_str(key.as_ref());
 
         let mut headers = crate::HeaderMap::default();
-        headers.insert(KV_OPERATION, HeaderValue::from(KV_OPERATION_PURGE));
-        headers.insert(NATS_ROLLUP, HeaderValue::from(ROLLUP_SUBJECT));
+        headers.insert(KV_OPERATION, KV_OPERATION_PURGE);
+        headers.insert(NATS_ROLLUP, ROLLUP_SUBJECT);
         if let Some(ttl) = ttl {
             headers.insert(header::NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
         }
