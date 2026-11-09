@@ -217,7 +217,13 @@ impl Connection {
 
             // Return early without advancing if there is not enough data read the entire
             // message
-            if len + payload_len + 4 > self.read_buf.remaining() {
+            let message_len = payload_len.checked_add(len + 4).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of bytes after MSG is too large",
+                )
+            })?;
+            if message_len > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -325,7 +331,13 @@ impl Connection {
                 ));
             }
 
-            if len + total_len + 4 > self.read_buf.remaining() {
+            let message_len = total_len.checked_add(len + 4).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "number of bytes after HMSG is too large",
+                )
+            })?;
+            if message_len > self.read_buf.remaining() {
                 return Ok(None);
             }
 
@@ -1223,6 +1235,37 @@ mod read_op {
         let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
 
         server.write_all(b"-ERR\r\n").await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    // The number of bytes after MSG or HMSG, plus the line itself, must fit
+    // in a usize for the parser to wait for the whole message; a number it
+    // cannot add up is an error.
+    #[tokio::test]
+    async fn msg_with_oversized_length_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server
+            .write_all(format!("MSG foo 1 {}\r\nhi\r\n", usize::MAX).as_bytes())
+            .await
+            .unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn hmsg_with_oversized_length_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server
+            .write_all(format!("HMSG foo 1 12 {}\r\nNATS/1.0\r\n\r\nhi\r\n", usize::MAX).as_bytes())
+            .await
+            .unwrap();
 
         let err = connection.read_op().await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
