@@ -157,7 +157,10 @@ impl Connection {
         }
 
         if self.read_buf.starts_with(b"-ERR") {
-            let description = str::from_utf8(&self.read_buf[5..len])
+            let description = self.read_buf.get(5..len).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "no message after -ERR")
+            })?;
+            let description = str::from_utf8(description)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
                 .trim_matches('\'')
                 .to_owned();
@@ -1207,6 +1210,19 @@ mod read_op {
             .await
             .unwrap();
         server.write_all(b"NATS/1.0\r\n\r\nhi\r\n").await.unwrap();
+
+        let err = connection.read_op().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    // `-ERR` is followed by a message; a line that ends right after the
+    // operation name is an error, not a server error with an empty message.
+    #[tokio::test]
+    async fn err_without_message_returns_error() {
+        let (stream, mut server) = io::duplex(128);
+        let mut connection = Connection::new(Box::new(stream), 0, Arc::new(Statistics::default()));
+
+        server.write_all(b"-ERR\r\n").await.unwrap();
 
         let err = connection.read_op().await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
