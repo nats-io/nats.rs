@@ -164,11 +164,19 @@ jobs:
             echo "websocket dependencies must not be locked when websockets are disabled" >&2
             exit 1
           fi
-      - name: Run TLS test with ${{ matrix.tls_feature }}
+      - name: Run the TLS tests with ${{ matrix.tls_feature }}
+        env:
+          RUST_BACKTRACE: 1
+        # The binaries that exercise the TLS backend, named, so that a test is run by what
+        # it covers and not by whether "tls" occurs in its name.
+        run: |
+          cargo test --test tls_options --test tls_tests --test websocket_test --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
+      - name: Run the TLS option tests without websockets
+        if: matrix.tls_feature == 'ring'
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test tls --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
+          cargo test --test tls_options --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,ring -- --nocapture
 
   server_2_11_tests:
     defaults:
