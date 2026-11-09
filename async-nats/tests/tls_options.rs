@@ -160,6 +160,11 @@ mod tls_options {
         Other(Vec<u8>),
     }
 
+    /// A canary whose INFO neither requires nor offers TLS.
+    async fn canary() -> (u16, mpsc::UnboundedReceiver<Seen>) {
+        canary_with(json!({})).await
+    }
+
     /// A canary whose INFO says that TLS is available but not required, like a server
     /// with `allow_non_tls`.
     async fn canary_offering_tls() -> (u16, mpsc::UnboundedReceiver<Seen>) {
@@ -353,5 +358,44 @@ mod tls_options {
             !seen.is_empty() && seen.iter().all(|seen| *seen == Seen::TlsHandshake),
             "{seen:?}"
         );
+    }
+
+    // With tls_optional() the client does not ask for TLS: a CA alone no longer keeps it
+    // from a server that has none.
+    #[tokio::test]
+    async fn tls_optional_connects_without_tls_when_the_server_has_none() {
+        let server = nats_server::run_basic_server();
+
+        let client = tls_options()
+            .tls_optional()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+        assert!(!client.server_info().tls_required);
+    }
+
+    // With tls_optional() each URL is connected to as its own scheme says: the `nats://`
+    // server gets CONNECT in plaintext, the `tls://` server next to it still gets TLS.
+    #[tokio::test]
+    async fn tls_optional_leaves_tls_to_each_url() {
+        let tls_server = nats_server::run_server("tests/configs/tls.conf");
+        let (port, mut canary) = canary().await;
+
+        let client = tls_options()
+            .add_client_certificate(certs("client-cert.pem"), certs("client-key.pem"))
+            .tls_optional()
+            .retain_servers_order()
+            .connect(vec![
+                format!("nats://127.0.0.1:{port}"),
+                tls_server.client_url(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(client.server_info().port, tls_server.client_port());
+        assert!(client.server_info().tls_required);
+        let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
+        assert_eq!(seen, vec![Seen::PlaintextConnect]);
     }
 }

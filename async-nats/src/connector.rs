@@ -142,6 +142,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) tls_first: bool,
+    pub(crate) tls_optional: bool,
     pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
@@ -190,9 +191,12 @@ fn url_asks_for_tls(addr: &ServerAddr) -> bool {
 }
 
 /// Names the setting that asks for TLS, if any. `tls_first` is read before `require_tls`,
-/// which it also sets.
+/// which it also sets. With `tls_optional` nothing asks for TLS; a `tls://` or `wss://` URL
+/// then gets TLS by its own scheme only.
 fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<&'static str> {
-    if options.tls_first {
+    if options.tls_optional {
+        None
+    } else if options.tls_first {
         Some("tls_first()")
     } else if options.tls_required {
         Some("require_tls(true)")
@@ -781,6 +785,7 @@ mod tests {
             client_key: None,
             tls_client_config: None,
             tls_first: false,
+            tls_optional: false,
             auth: Auth::default(),
             no_echo: false,
             connection_timeout: Duration::from_secs(5),
@@ -864,6 +869,19 @@ mod tests {
                 "{urls:?}"
             );
         }
+    }
+
+    #[test]
+    fn tls_optional_asks_for_no_tls() {
+        let options = ConnectorOptions {
+            tls_optional: true,
+            certificates: vec![PathBuf::from("ca.pem")],
+            client_cert: Some(PathBuf::from("cert.pem")),
+            client_key: Some(PathBuf::from("key.pem")),
+            ..options()
+        };
+        let mixed = servers(&["nats://localhost:4222", "tls://localhost:4223"]);
+        assert_eq!(tls_asked_by(&options, &mixed), None);
     }
 
     #[test]
