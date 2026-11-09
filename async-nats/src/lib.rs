@@ -1074,8 +1074,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         state_tx,
         max_payload.clone(),
         statistics.clone(),
-    )
-    .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
+    )?;
 
     let mut info = None;
     let mut connection = None;
@@ -1246,6 +1245,10 @@ pub enum ConnectErrorKind {
     Io,
     /// Reached the maximum number of reconnects.
     MaxReconnects,
+    /// Options that cannot be combined, or a server URL this build or the client's
+    /// settings cannot connect to. Returned before any connection attempt, also with
+    /// [`ConnectOptions::retry_on_initial_connect`], and never retried.
+    Configuration,
 }
 
 impl Display for ConnectErrorKind {
@@ -1259,6 +1262,7 @@ impl Display for ConnectErrorKind {
             Self::Tls => write!(f, "TLS error"),
             Self::Io => write!(f, "IO error"),
             Self::MaxReconnects => write!(f, "reached maximum number of reconnects"),
+            Self::Configuration => write!(f, "configuration error"),
         }
     }
 }

@@ -43,7 +43,6 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use std::cmp;
 use std::fmt;
-use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -213,6 +212,15 @@ fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<&'stat
     }
 }
 
+/// The URL as an error message prints it: with its username and password cleared.
+fn without_user_info(addr: &ServerAddr) -> String {
+    let mut url = addr.clone().into_inner();
+    // Clearing fails only for a URL without a host, which a server URL always has.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.into()
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -221,9 +229,51 @@ impl Connector {
         state_tx: tokio::sync::watch::Sender<State>,
         max_payload: Arc<AtomicUsize>,
         connect_stats: Arc<Statistics>,
-    ) -> Result<Connector, io::Error> {
-        let servers: Vec<Server> = addrs.to_server_addrs()?.map(Server::new).collect();
+    ) -> Result<Connector, ConnectError> {
+        let servers: Vec<Server> = addrs
+            .to_server_addrs()
+            .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?
+            .map(Server::new)
+            .collect();
+
+        // Refused here, before any attempt, so that retry_on_initial_connect cannot
+        // retry what no attempt can fix.
+        if options.tls_optional && options.tls_first {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                "tls_optional() cannot be set together with tls_first()",
+            ));
+        }
+        if options.tls_optional && options.tls_required {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                "tls_optional() cannot be set together with require_tls(true)",
+            ));
+        }
+        #[cfg(not(feature = "websockets"))]
+        if servers.iter().any(|server| server.addr.is_websocket()) {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                "a ws:// or wss:// URL needs the websockets feature of async-nats",
+            ));
+        }
+
         let tls_asked_by = tls_asked_by(&options, &servers);
+
+        // A ws:// URL cannot be upgraded: in WebSocket, TLS is fixed by the scheme before
+        // the opening handshake, so dialing ws:// with TLS would replace the scheme the
+        // user wrote, and dialing it as written would leave out the TLS asked for.
+        if let Some(asked_by) = tls_asked_by {
+            if let Some(server) = servers.iter().find(|server| server.addr.scheme() == "ws") {
+                return Err(ConnectError::with_source(
+                    ConnectErrorKind::Configuration,
+                    format!(
+                        "{asked_by} asks for TLS, but {} is a ws:// URL; wss:// is the TLS form",
+                        without_user_info(&server.addr)
+                    ),
+                ));
+            }
+        }
 
         Ok(Connector {
             attempts: 0,

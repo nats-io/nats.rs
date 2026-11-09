@@ -18,7 +18,7 @@
 mod tls_options {
     use std::{path::PathBuf, sync::Arc, time::Duration};
 
-    use async_nats::ConnectOptions;
+    use async_nats::{ConnectErrorKind, ConnectOptions};
     use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
     use serde_json::{json, Value};
     use tokio::{
@@ -397,5 +397,134 @@ mod tls_options {
         assert!(client.server_info().tls_required);
         let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
         assert_eq!(seen, vec![Seen::PlaintextConnect]);
+    }
+
+    // tls_optional() set next to a setting that asks for TLS is refused at connect, before
+    // any attempt: retry_on_initial_connect() does not retry it.
+    #[tokio::test]
+    async fn tls_optional_with_require_tls_is_a_configuration_error() {
+        let err = ConnectOptions::new()
+            .tls_optional()
+            .require_tls(true)
+            .retry_on_initial_connect()
+            .connect("nats://127.0.0.1:1")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConnectErrorKind::Configuration);
+        let message = err.to_string();
+        assert!(
+            message.contains("tls_optional()") && message.contains("require_tls(true)"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tls_optional_with_tls_first_is_a_configuration_error() {
+        let err = ConnectOptions::new()
+            .tls_optional()
+            .tls_first()
+            .retry_on_initial_connect()
+            .connect("nats://127.0.0.1:1")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConnectErrorKind::Configuration);
+        let message = err.to_string();
+        assert!(
+            message.contains("tls_optional()") && message.contains("tls_first()"),
+            "{message}"
+        );
+    }
+
+    // A websocket URL in a build without the feature is refused at connect instead of
+    // being dialed as plain TCP.
+    #[cfg(not(feature = "websockets"))]
+    #[tokio::test]
+    async fn websocket_url_without_the_feature_is_a_configuration_error() {
+        for url in ["ws://127.0.0.1:1", "wss://127.0.0.1:1"] {
+            let err = ConnectOptions::new()
+                .retry_on_initial_connect()
+                .connect(url)
+                .await
+                .unwrap_err();
+
+            assert_eq!(err.kind(), ConnectErrorKind::Configuration, "{url}");
+            assert!(err.to_string().contains("websockets"), "{err}");
+        }
+    }
+
+    /// Connects `options` to a ws:// URL with user info, `more` URLs after it, and returns
+    /// the configuration error. It names the URL without its user info, the setting that
+    /// asked for TLS and the wss:// form; the canary on the ws:// port sees nothing, also
+    /// with retry_on_initial_connect().
+    #[cfg(feature = "websockets")]
+    async fn ws_url_is_refused(options: ConnectOptions, more: Vec<String>, asked_by: &str) {
+        let (port, mut canary) = canary().await;
+        let mut urls = vec![format!("ws://derek:porkchop@127.0.0.1:{port}")];
+        urls.extend(more);
+
+        let err = options
+            .retain_servers_order()
+            .retry_on_initial_connect()
+            .connect(urls)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConnectErrorKind::Configuration, "{asked_by}");
+        let message = err.to_string();
+        assert!(
+            message.contains(&format!("ws://127.0.0.1:{port}"))
+                && !message.contains("derek")
+                && !message.contains("porkchop")
+                && message.contains(asked_by)
+                && message.contains("wss://"),
+            "{message}"
+        );
+        let seen = seen_during(&mut canary, Duration::from_millis(500)).await;
+        assert!(seen.is_empty(), "{asked_by}: {seen:?}");
+    }
+
+    // A ws:// URL in a client that asks for TLS is refused at connect, before any attempt:
+    // the websocket has no upgrade, so the URL is neither dialed in plaintext nor with TLS.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn ws_url_under_require_tls_is_a_configuration_error() {
+        ws_url_is_refused(
+            ConnectOptions::new().require_tls(true),
+            vec![],
+            "require_tls(true)",
+        )
+        .await;
+    }
+
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn ws_url_under_root_certificates_is_a_configuration_error() {
+        ws_url_is_refused(
+            ConnectOptions::new().add_root_certificates(certs("rootCA.pem")),
+            vec![],
+            "add_root_certificates()",
+        )
+        .await;
+    }
+
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn ws_url_under_tls_first_is_a_configuration_error() {
+        ws_url_is_refused(ConnectOptions::new().tls_first(), vec![], "tls_first()").await;
+    }
+
+    // A wss:// URL asks for TLS for the whole list, so a ws:// URL next to it is refused
+    // too.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn ws_url_next_to_a_wss_url_is_a_configuration_error() {
+        ws_url_is_refused(
+            ConnectOptions::new(),
+            vec!["wss://127.0.0.1:1".to_string()],
+            "a tls:// or wss:// server URL",
+        )
+        .await;
     }
 }
