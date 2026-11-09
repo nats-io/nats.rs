@@ -1959,6 +1959,17 @@ mod tests {
     }
 
     #[test]
+    fn server_address_scheme_is_compared_without_case() {
+        let address = ServerAddr::from_str("TLS://localhost:4222").unwrap();
+        assert_eq!(address.scheme(), "tls");
+        assert!(address.tls_required());
+
+        let address = ServerAddr::from_str("WSS://localhost:8443").unwrap();
+        assert_eq!(address.scheme(), "wss");
+        assert!(address.is_websocket());
+    }
+
+    #[test]
     fn server_address_domain() {
         let address = ServerAddr::from_str("nats://example.com").unwrap();
         assert_eq!(address.host(), "example.com")

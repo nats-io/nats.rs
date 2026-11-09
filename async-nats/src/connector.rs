@@ -161,6 +161,10 @@ pub(crate) struct Connector {
     /// Server pool with per-server metadata.
     servers: Vec<Server>,
     options: ConnectorOptions,
+    /// The setting that asked for TLS, if any, as error messages name it. When set, every
+    /// attempt to every server uses TLS, discovered servers and reconnects included, and
+    /// nothing the server sends turns it off.
+    tls_asked_by: Option<&'static str>,
     pub(crate) connect_stats: Arc<Statistics>,
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
@@ -180,6 +184,31 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     }
 }
 
+/// Whether the scheme of the URL asks for TLS.
+fn url_asks_for_tls(addr: &ServerAddr) -> bool {
+    matches!(addr.scheme(), "tls" | "wss")
+}
+
+/// Names the setting that asks for TLS, if any. `tls_first` is read before `require_tls`,
+/// which it also sets.
+fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<&'static str> {
+    if options.tls_first {
+        Some("tls_first()")
+    } else if options.tls_required {
+        Some("require_tls(true)")
+    } else if servers.iter().any(|server| url_asks_for_tls(&server.addr)) {
+        Some("a tls:// or wss:// server URL")
+    } else if !options.certificates.is_empty() {
+        Some("add_root_certificates()")
+    } else if options.client_cert.is_some() {
+        Some("add_client_certificate()")
+    } else if options.tls_client_config.is_some() {
+        Some("tls_client_config()")
+    } else {
+        None
+    }
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -189,12 +218,14 @@ impl Connector {
         max_payload: Arc<AtomicUsize>,
         connect_stats: Arc<Statistics>,
     ) -> Result<Connector, io::Error> {
-        let servers = addrs.to_server_addrs()?.map(Server::new).collect();
+        let servers: Vec<Server> = addrs.to_server_addrs()?.map(Server::new).collect();
+        let tls_asked_by = tls_asked_by(&options, &servers);
 
         Ok(Connector {
             attempts: 0,
             servers,
             options,
+            tls_asked_by,
             events_tx,
             state_tx,
             max_payload,
@@ -597,7 +628,7 @@ impl Connector {
         // If `tls_first` was not set, establish TLS connection if it is required.
         if !self.options.tls_first
             && !server_addr.is_websocket()
-            && (self.options.tls_required || info.tls_required || tls_required)
+            && (self.tls_asked_by.is_some() || info.tls_required || tls_required)
         {
             connection = tls_connection(connection).await?;
         };
@@ -619,7 +650,7 @@ impl Connector {
         }
 
         // Build CONNECT message with auth info.
-        let tls_required = self.options.tls_required || server_addr.tls_required();
+        let tls_required = self.tls_asked_by.is_some() || server_addr.tls_required();
         let mut connect_info = ConnectInfo {
             tls_required,
             name: self.options.name.clone(),
@@ -741,6 +772,99 @@ impl Connector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn options() -> ConnectorOptions {
+        ConnectorOptions {
+            tls_required: false,
+            certificates: Vec::new(),
+            client_cert: None,
+            client_key: None,
+            tls_client_config: None,
+            tls_first: false,
+            auth: Auth::default(),
+            no_echo: false,
+            connection_timeout: Duration::from_secs(5),
+            name: None,
+            ignore_discovered_servers: false,
+            retain_servers_order: false,
+            read_buffer_capacity: 65535,
+            reconnect_delay_callback: Arc::new(reconnect_delay_callback_default),
+            auth_callback: None,
+            max_reconnects: None,
+            local_address: None,
+            reconnect_to_server_callback: None,
+        }
+    }
+
+    fn servers(urls: &[&str]) -> Vec<Server> {
+        urls.iter()
+            .map(|url| Server::new(url.parse().unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn tls_is_asked_for_by_every_tls_setting() {
+        let plain = servers(&["nats://localhost:4222", "ws://localhost:8080"]);
+        assert_eq!(tls_asked_by(&options(), &plain), None);
+
+        let tls_client_config = rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        for (expected, options) in [
+            (
+                "require_tls(true)",
+                ConnectorOptions {
+                    tls_required: true,
+                    ..options()
+                },
+            ),
+            (
+                "tls_first()",
+                ConnectorOptions {
+                    tls_required: true,
+                    tls_first: true,
+                    ..options()
+                },
+            ),
+            (
+                "add_root_certificates()",
+                ConnectorOptions {
+                    certificates: vec![PathBuf::from("ca.pem")],
+                    ..options()
+                },
+            ),
+            (
+                "add_client_certificate()",
+                ConnectorOptions {
+                    client_cert: Some(PathBuf::from("cert.pem")),
+                    client_key: Some(PathBuf::from("key.pem")),
+                    ..options()
+                },
+            ),
+            (
+                "tls_client_config()",
+                ConnectorOptions {
+                    tls_client_config: Some(tls_client_config),
+                    ..options()
+                },
+            ),
+        ] {
+            assert_eq!(tls_asked_by(&options, &plain), Some(expected));
+        }
+
+        // One URL asks for TLS for the whole list, whatever its case.
+        for urls in [
+            ["nats://localhost:4222", "tls://localhost:4223"],
+            ["ws://localhost:8080", "wss://localhost:8443"],
+            ["nats://localhost:4222", "TLS://localhost:4223"],
+        ] {
+            assert_eq!(
+                tls_asked_by(&options(), &servers(&urls)),
+                Some("a tls:// or wss:// server URL"),
+                "{urls:?}"
+            );
+        }
+    }
 
     #[test]
     fn reconnect_delay_callback_duration() {

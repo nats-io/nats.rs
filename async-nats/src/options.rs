@@ -529,6 +529,9 @@ impl ConnectOptions {
 
     /// Loads root certificates by providing the path to them.
     ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -546,6 +549,9 @@ impl ConnectOptions {
     }
 
     /// Loads client certificate by providing the path to it.
+    ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
     ///
     /// # Examples
     /// ```no_run
@@ -565,6 +571,11 @@ impl ConnectOptions {
     }
 
     /// Sets or disables TLS requirement. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
+    ///
+    /// A `tls://` or `wss://` server URL, root certificates, a client certificate, a TLS client
+    /// config and [`ConnectOptions::tls_first`] ask for TLS too. TLS then applies to every
+    /// server in the list, servers discovered from the cluster and reconnects included, and
+    /// nothing the server sends turns it off.
     ///
     /// # Examples
     /// ```no_run
@@ -968,6 +979,9 @@ impl ConnectOptions {
     }
 
     /// Allows passing custom rustls tls config.
+    ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
     ///
     /// # Examples
     /// ```
