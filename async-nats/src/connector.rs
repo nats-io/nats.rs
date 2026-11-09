@@ -13,6 +13,8 @@
 
 use crate::auth::Auth;
 use crate::client::Statistics;
+#[cfg(feature = "websockets")]
+use crate::connection::AsyncReadWrite;
 use crate::connection::Connection;
 use crate::connection::State;
 #[cfg(feature = "websockets")]
@@ -48,6 +50,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::time::sleep;
 use tokio_rustls::rustls;
@@ -554,6 +557,29 @@ impl Connector {
         }))
     }
 
+    /// Runs the TLS handshake on `stream` and verifies the server certificate.
+    async fn tls_handshake<S>(
+        &self,
+        stream: S,
+        server_addr: &ServerAddr,
+    ) -> Result<tokio_rustls::client::TlsStream<S>, ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        tracing::debug!("upgrading connection to TLS");
+        let tls_config = Arc::new(
+            tls::config_tls(&self.options)
+                .await
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
+        );
+        let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+
+        let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
+            .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
+
+        Ok(tls_connector.connect(domain.to_owned(), stream).await?)
+    }
+
     pub(crate) async fn try_connect_to(
         &mut self,
         socket_addr: &SocketAddr,
@@ -565,79 +591,53 @@ impl Connector {
             tls_required = %tls_required,
             "establishing connection"
         );
+        let tcp_stream = if let Some(local_addr) = self.options.local_address {
+            let socket = if local_addr.is_ipv4() {
+                TcpSocket::new_v4()?
+            } else {
+                TcpSocket::new_v6()?
+            };
+            socket
+                .bind(local_addr)
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+            socket.connect(*socket_addr).await?
+        } else {
+            TcpStream::connect(socket_addr).await?
+        };
+        tcp_stream.set_nodelay(true)?;
+
         let mut connection = match server_addr.scheme() {
+            // The websocket handshake runs on the client's own stream, so every resolved
+            // address is tried, and TLS sits below the websocket framing as the scheme says:
+            // a wss:// URL gets the same handshake as a tls:// URL, a ws:// URL none.
             #[cfg(feature = "websockets")]
-            "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
-                    .uri(server_addr.as_url_str())
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
-
-                let con = WebSocketAdapter::new(ws.0);
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
-            }
-            #[cfg(feature = "websockets")]
-            "wss" => {
-                let tls_config =
-                    Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
-                    })?);
-                let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                    .uri(server_addr.as_url_str())
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
-                let con = WebSocketAdapter::new(ws.0);
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
-            }
-            _ => {
-                let tcp_stream = if let Some(local_addr) = self.options.local_address {
-                    let socket = if local_addr.is_ipv4() {
-                        TcpSocket::new_v4()?
-                    } else {
-                        TcpSocket::new_v6()?
-                    };
-                    socket.bind(local_addr).map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
-                    })?;
-                    socket.connect(*socket_addr).await?
+            "ws" | "wss" => {
+                let stream: Box<dyn AsyncReadWrite> = if server_addr.scheme() == "wss" {
+                    Box::new(self.tls_handshake(tcp_stream, &server_addr).await?)
                 } else {
-                    TcpStream::connect(socket_addr).await?
+                    Box::new(tcp_stream)
                 };
-                tcp_stream.set_nodelay(true)?;
+                let ws = tokio_websockets::client::Builder::new()
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
+                    .connect_on(stream)
+                    .await
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
 
-                Connection::new(
-                    Box::new(tcp_stream),
-                    self.options.read_buffer_capacity.into(),
-                    self.connect_stats.clone(),
-                )
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
+            _ => Connection::new(
+                Box::new(tcp_stream),
+                self.options.read_buffer_capacity.into(),
+                self.connect_stats.clone(),
+            ),
         };
 
         let tls_connection = |connection: Connection| async {
-            tracing::debug!("upgrading connection to TLS");
-            let tls_config = Arc::new(
-                tls::config_tls(&self.options)
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
-            );
-            let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-
-            let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
-
-            let tls_stream = tls_connector
-                .connect(domain.to_owned(), connection.stream)
-                .await?;
+            let tls_stream = self.tls_handshake(connection.stream, &server_addr).await?;
 
             Ok::<Connection, ConnectError>(Connection::new(
                 Box::new(tls_stream),

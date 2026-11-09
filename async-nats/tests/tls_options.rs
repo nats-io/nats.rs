@@ -34,6 +34,30 @@ mod tls_options {
             .join(name)
     }
 
+    #[cfg(feature = "websockets")]
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    /// Writes a server config to a temporary file. `{certs}` expands to the certificate
+    /// directory with `/` as the separator: the server reads `\` in a quoted string as an
+    /// escape, so a Windows path would not parse.
+    #[cfg(feature = "websockets")]
+    fn config(contents: &str) -> String {
+        let dir = certs("").display().to_string().replace('\\', "/");
+        let path = std::env::temp_dir().join(format!("tls-options-{}.conf", rand::random::<u64>()));
+        std::fs::write(
+            &path,
+            contents.replace("{certs}", dir.trim_end_matches('/')),
+        )
+        .unwrap();
+        path.display().to_string()
+    }
+
     fn info_line(info: &Value) -> Vec<u8> {
         format!("INFO {info}\r\n").into_bytes()
     }
@@ -526,5 +550,70 @@ mod tls_options {
             "a tls:// or wss:// server URL",
         )
         .await;
+    }
+
+    // With tls_optional() each websocket URL keeps its own scheme, so ws:// and wss://
+    // URLs can share a list: the ws:// server gets a plaintext websocket upgrade, the
+    // wss:// server next to it gets TLS.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn tls_optional_keeps_each_websocket_url_its_own_scheme() {
+        let ws_port = free_port();
+        let server = nats_server::run_server(&config(&format!(
+            "websocket {{ port: {ws_port}, tls {{ cert_file: \"{{certs}}/server-cert.pem\", \
+             key_file: \"{{certs}}/server-key.pem\" }} }}"
+        )));
+        let _ = server.client_url();
+        let (port, mut canary) = canary().await;
+
+        let client = tls_options()
+            .tls_optional()
+            .retain_servers_order()
+            .connect(vec![
+                format!("ws://127.0.0.1:{port}"),
+                format!("wss://localhost:{ws_port}"),
+            ])
+            .await
+            .unwrap();
+        // The canary closes after the first bytes, so the live connection is to the
+        // wss:// server.
+        client.flush().await.unwrap();
+        let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
+        assert_eq!(seen, vec![Seen::PlaintextWebsocket]);
+    }
+
+    // With tls_optional() a ws:// URL is a plaintext websocket, CA or not.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn tls_optional_leaves_a_ws_url_in_plaintext() {
+        let (port, mut canary) = canary().await;
+
+        let result = tls_options()
+            .tls_optional()
+            .connection_timeout(Duration::from_millis(1500))
+            .connect(format!("ws://127.0.0.1:{port}"))
+            .await;
+
+        assert!(result.is_err());
+        let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
+        assert_eq!(seen, vec![Seen::PlaintextWebsocket]);
+    }
+
+    // Every address the host resolves to is tried for a websocket URL too. `localhost`
+    // usually resolves to `::1` first, and this server listens on IPv4 only.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn websocket_tries_every_resolved_address() {
+        let ws_port = free_port();
+        let server = nats_server::run_server(&config(&format!(
+            "websocket {{ host: 127.0.0.1, port: {ws_port}, no_tls: true }}"
+        )));
+        let _ = server.client_url();
+
+        let client = ConnectOptions::new()
+            .connect(format!("ws://localhost:{ws_port}"))
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
     }
 }
