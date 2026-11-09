@@ -43,6 +43,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use rand::rng;
 use rand::seq::SliceRandom;
+use std::borrow::Cow;
 use std::cmp;
 use std::fmt;
 use std::path::PathBuf;
@@ -164,10 +165,10 @@ pub(crate) struct Connector {
     /// Server pool with per-server metadata.
     servers: Vec<Server>,
     options: ConnectorOptions,
-    /// The setting that asked for TLS, if any, as error messages name it. When set, every
-    /// attempt to every server uses TLS, discovered servers and reconnects included, and
-    /// nothing the server sends turns it off.
-    tls_asked_by: Option<&'static str>,
+    /// The setting or URL that asked for TLS, if any, as error messages name it. When set,
+    /// every attempt to every server uses TLS, discovered servers and reconnects included,
+    /// and nothing the server sends turns it off.
+    tls_asked_by: Option<Cow<'static, str>>,
     pub(crate) connect_stats: Arc<Statistics>,
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
@@ -192,24 +193,26 @@ fn url_asks_for_tls(addr: &ServerAddr) -> bool {
     matches!(addr.scheme(), "tls" | "wss")
 }
 
-/// Names the setting that asks for TLS, if any. `tls_first` is read before `require_tls`,
-/// which it also sets. With `tls_optional` nothing asks for TLS; a `tls://` or `wss://` URL
-/// then gets TLS by its own scheme only.
-fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<&'static str> {
+/// Names the setting that asks for TLS, if any: an option by its name, a `tls://` or
+/// `wss://` URL of the list by the first such URL, without its user info. `tls_first` is
+/// read before `require_tls`, which it also sets. With `tls_optional` nothing asks for TLS;
+/// a `tls://` or `wss://` URL then gets TLS by its own scheme only.
+fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<Cow<'static, str>> {
+    let tls_url = servers.iter().find(|server| url_asks_for_tls(&server.addr));
     if options.tls_optional {
         None
     } else if options.tls_first {
-        Some("tls_first()")
+        Some("tls_first()".into())
     } else if options.tls_required {
-        Some("require_tls(true)")
-    } else if servers.iter().any(|server| url_asks_for_tls(&server.addr)) {
-        Some("a tls:// or wss:// server URL")
+        Some("require_tls(true)".into())
+    } else if let Some(server) = tls_url {
+        Some(format!("the URL {:?}", without_user_info(&server.addr)).into())
     } else if !options.certificates.is_empty() {
-        Some("add_root_certificates()")
+        Some("add_root_certificates()".into())
     } else if options.client_cert.is_some() {
-        Some("add_client_certificate()")
+        Some("add_client_certificate()".into())
     } else if options.tls_client_config.is_some() {
-        Some("tls_client_config()")
+        Some("tls_client_config()".into())
     } else {
         None
     }
@@ -266,12 +269,12 @@ impl Connector {
         // A ws:// URL cannot be upgraded: in WebSocket, TLS is fixed by the scheme before
         // the opening handshake, so dialing ws:// with TLS would replace the scheme the
         // user wrote, and dialing it as written would leave out the TLS asked for.
-        if let Some(asked_by) = tls_asked_by {
+        if let Some(asked_by) = &tls_asked_by {
             if let Some(server) = servers.iter().find(|server| server.addr.scheme() == "ws") {
                 return Err(ConnectError::with_source(
                     ConnectErrorKind::Configuration,
                     format!(
-                        "{asked_by} asks for TLS, but {} is a ws:// URL; wss:// is the TLS form",
+                        "{asked_by} asks for TLS, but {:?} is a ws:// URL; wss:// is the TLS form",
                         without_user_info(&server.addr)
                     ),
                 ));
@@ -684,6 +687,28 @@ impl Connector {
             && !server_addr.is_websocket()
             && (self.tls_asked_by.is_some() || info.tls_required || tls_required)
         {
+            // A server whose INFO neither requires nor offers TLS cannot answer the
+            // handshake. Instead of starting one, say which server, what asked for TLS and,
+            // where the server's own URL did not, how to leave TLS to it.
+            if !info.tls_required && !info.tls_available {
+                let server = format!("{:?}", without_user_info(&server_addr));
+                let message = match &self.tls_asked_by {
+                    Some(asked_by) if !server_addr.tls_required() => format!(
+                        "{asked_by} asks for TLS, but {server} does not offer it; \
+                         tls_optional() leaves TLS to each server"
+                    ),
+                    Some(asked_by) => {
+                        format!("{asked_by} asks for TLS, but {server} does not offer it")
+                    }
+                    None => {
+                        format!("the URL {server} asks for TLS, but {server} does not offer it")
+                    }
+                };
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Tls,
+                    message,
+                ));
+            }
             connection = tls_connection(connection).await?;
         };
 
@@ -904,18 +929,28 @@ mod tests {
                 },
             ),
         ] {
-            assert_eq!(tls_asked_by(&options, &plain), Some(expected));
+            assert_eq!(tls_asked_by(&options, &plain).as_deref(), Some(expected));
         }
 
-        // One URL asks for TLS for the whole list, whatever its case.
-        for urls in [
-            ["nats://localhost:4222", "tls://localhost:4223"],
-            ["ws://localhost:8080", "wss://localhost:8443"],
-            ["nats://localhost:4222", "TLS://localhost:4223"],
+        // One URL asks for TLS for the whole list, whatever its case, and is named without
+        // its user info.
+        for (urls, expected) in [
+            (
+                ["nats://localhost:4222", "tls://localhost:4223"],
+                r#"the URL "tls://localhost:4223""#,
+            ),
+            (
+                ["ws://localhost:8080", "wss://derek:porkchop@localhost:8443"],
+                r#"the URL "wss://localhost:8443/""#,
+            ),
+            (
+                ["nats://localhost:4222", "TLS://localhost:4223"],
+                r#"the URL "tls://localhost:4223""#,
+            ),
         ] {
             assert_eq!(
-                tls_asked_by(&options(), &servers(&urls)),
-                Some("a tls:// or wss:// server URL"),
+                tls_asked_by(&options(), &servers(&urls)).as_deref(),
+                Some(expected),
                 "{urls:?}"
             );
         }

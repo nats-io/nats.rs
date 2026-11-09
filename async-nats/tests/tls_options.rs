@@ -498,7 +498,7 @@ mod tls_options {
         assert_eq!(err.kind(), ConnectErrorKind::Configuration, "{asked_by}");
         let message = err.to_string();
         assert!(
-            message.contains(&format!("ws://127.0.0.1:{port}"))
+            message.contains(&format!("\"ws://127.0.0.1:{port}/\""))
                 && !message.contains("derek")
                 && !message.contains("porkchop")
                 && message.contains(asked_by)
@@ -540,14 +540,14 @@ mod tls_options {
     }
 
     // A wss:// URL asks for TLS for the whole list, so a ws:// URL next to it is refused
-    // too.
+    // too. The error names that URL without its user info.
     #[cfg(feature = "websockets")]
     #[tokio::test]
     async fn ws_url_next_to_a_wss_url_is_a_configuration_error() {
         ws_url_is_refused(
             ConnectOptions::new(),
-            vec!["wss://127.0.0.1:1".to_string()],
-            "a tls:// or wss:// server URL",
+            vec!["wss://derek:porkchop@127.0.0.1:1".to_string()],
+            "the URL \"wss://127.0.0.1:1/\" asks for TLS",
         )
         .await;
     }
@@ -615,5 +615,103 @@ mod tls_options {
             .await
             .unwrap();
         client.flush().await.unwrap();
+    }
+
+    // Against a server whose INFO neither requires nor offers TLS, the error names the
+    // server and the setting or URL that asked for TLS and, unless the server's own URL did,
+    // tls_optional() as the way out. CONNECT never goes out in plaintext.
+    #[tokio::test]
+    async fn server_without_tls_names_the_setting_that_asked_for_it() {
+        const WAY_OUT: &str = "tls_optional() leaves TLS to each server";
+        for (scheme, options, expected) in [
+            (
+                "nats",
+                ConnectOptions::new().require_tls(true),
+                format!(
+                    "require_tls(true) asks for TLS, but {{server}} does not offer it; {WAY_OUT}"
+                ),
+            ),
+            (
+                "nats",
+                ConnectOptions::new().add_root_certificates(certs("rootCA.pem")),
+                format!(
+                    "add_root_certificates() asks for TLS, but {{server}} does not offer it; \
+                     {WAY_OUT}"
+                ),
+            ),
+            (
+                "nats",
+                ConnectOptions::new()
+                    .add_client_certificate(certs("client-cert.pem"), certs("client-key.pem")),
+                format!(
+                    "add_client_certificate() asks for TLS, but {{server}} does not offer it; \
+                     {WAY_OUT}"
+                ),
+            ),
+            (
+                "nats",
+                ConnectOptions::new().tls_client_config(client_config()),
+                format!(
+                    "tls_client_config() asks for TLS, but {{server}} does not offer it; {WAY_OUT}"
+                ),
+            ),
+            (
+                "tls",
+                ConnectOptions::new(),
+                "the URL {server} asks for TLS, but {server} does not offer it".to_string(),
+            ),
+            (
+                "tls",
+                ConnectOptions::new().tls_optional(),
+                "the URL {server} asks for TLS, but {server} does not offer it".to_string(),
+            ),
+        ] {
+            let (port, mut canary) = canary().await;
+            let url = format!("{scheme}://127.0.0.1:{port}");
+            let expected = expected.replace("{server}", &format!("{url:?}"));
+
+            let err = options
+                .user_and_password("derek".into(), "porkchop".into())
+                .connection_timeout(Duration::from_millis(1500))
+                .connect(url)
+                .await
+                .unwrap_err();
+
+            assert_eq!(err.kind(), ConnectErrorKind::Tls, "{expected}");
+            assert_eq!(err.to_string(), format!("TLS error: {expected}"));
+            let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
+            assert!(
+                !seen.contains(&Seen::PlaintextConnect),
+                "{expected}: {seen:?}"
+            );
+        }
+    }
+
+    // In a list that mixes tls:// and nats:// URLs, the error for the nats:// server
+    // without TLS names that server, the URL that asked for TLS and the way out, both URLs
+    // without their user info.
+    #[tokio::test]
+    async fn mixed_list_names_the_server_the_tls_url_and_the_way_out() {
+        let (port, _canary) = canary().await;
+
+        let err = ConnectOptions::new()
+            .retain_servers_order()
+            .connection_timeout(Duration::from_millis(1500))
+            .connect(vec![
+                "tls://derek:porkchop@127.0.0.1:1".to_string(),
+                format!("nats://derek:porkchop@127.0.0.1:{port}"),
+            ])
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConnectErrorKind::Tls);
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "TLS error: the URL \"tls://127.0.0.1:1\" asks for TLS, but \
+                 \"nats://127.0.0.1:{port}\" does not offer it; tls_optional() leaves TLS to \
+                 each server"
+            )
+        );
     }
 }

@@ -315,6 +315,9 @@ pub struct ServerInfo {
     /// If this is set, then the server must authenticate using TLS.
     #[serde(default)]
     pub tls_required: bool,
+    /// If this is set, then the server offers TLS without requiring it.
+    #[serde(default)]
+    pub tls_available: bool,
     /// Maximum payload size that the server will accept.
     #[serde(default)]
     pub max_payload: usize,
@@ -1239,7 +1242,7 @@ pub enum ConnectErrorKind {
     AuthorizationViolation,
     /// Connect timed out.
     TimedOut,
-    /// Erroneous TLS setup.
+    /// Erroneous TLS setup, or a server that does not offer TLS while a setting asks for it.
     Tls,
     /// Other IO error.
     Io,
