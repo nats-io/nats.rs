@@ -414,7 +414,7 @@ pub(crate) enum Command {
     Reconnect,
     SetServerPool {
         servers: Vec<ServerAddr>,
-        result: oneshot::Sender<Result<(), String>>,
+        result: oneshot::Sender<Result<(), SetServerPoolError>>,
     },
     ServerPool {
         result: oneshot::Sender<Vec<connector::Server>>,

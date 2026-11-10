@@ -19,6 +19,8 @@ mod tls_options {
     use std::{path::PathBuf, sync::Arc, time::Duration};
 
     use async_nats::{ConnectErrorKind, ConnectOptions};
+    #[cfg(feature = "websockets")]
+    use async_nats::{ServerAddr, SetServerPoolErrorKind};
     use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
     use serde_json::{json, Value};
     use tokio::{
@@ -580,6 +582,61 @@ mod tls_options {
         client.flush().await.unwrap();
         let seen = seen_during(&mut canary, Duration::from_millis(200)).await;
         assert_eq!(seen, vec![Seen::PlaintextWebsocket]);
+    }
+
+    // A pool given after connect is checked as the list at connect was: whether the client
+    // asks for TLS was fixed then, so a ws:// URL fails the call that sets the pool, which
+    // names the URL without its user info, the setting and the wss:// form, and leaves the
+    // pool as it was.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn set_server_pool_refuses_a_ws_url_when_tls_is_asked_for() {
+        let server = FakeServer::tls(json!({})).await;
+        let client = tls_options()
+            .require_tls(true)
+            .connect(format!("nats://localhost:{}", server.port))
+            .await
+            .unwrap();
+        let before = pool_urls(&client).await;
+        let port = 1;
+
+        let err = client
+            .set_server_pool(vec![format!("ws://derek:porkchop@127.0.0.1:{port}")])
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), SetServerPoolErrorKind::Configuration);
+        let message = err.to_string();
+        assert!(
+            message.contains(&format!("ws://127.0.0.1:{port}"))
+                && !message.contains("derek")
+                && !message.contains("porkchop")
+                && message.contains("require_tls(true)")
+                && message.contains("wss://"),
+            "{message}"
+        );
+        assert_eq!(pool_urls(&client).await, before);
+    }
+
+    // Under tls_optional() nothing asked for TLS at connect, so the same pool is taken.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn set_server_pool_takes_a_ws_url_under_tls_optional() {
+        let server = FakeServer::tls(json!({})).await;
+        let client = tls_options()
+            .tls_optional()
+            .connect(format!("nats://localhost:{}", server.port))
+            .await
+            .unwrap();
+        let url: ServerAddr = "ws://127.0.0.1:1".parse().unwrap();
+
+        client.set_server_pool(vec![url.clone()]).await.unwrap();
+
+        let pool = client.server_pool().await.unwrap();
+        assert_eq!(
+            pool.iter().map(|server| &server.addr).collect::<Vec<_>>(),
+            vec![&url]
+        );
     }
 
     // With tls_optional() a ws:// URL is a plaintext websocket, CA or not.

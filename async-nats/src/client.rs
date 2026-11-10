@@ -968,6 +968,11 @@ impl Client {
     /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
     /// is cleared.
     ///
+    /// The pool is checked as the server list at connect is. Whether the client asks
+    /// for TLS was fixed at connect, so a `ws://` URL is refused with
+    /// [`SetServerPoolErrorKind::Configuration`] when it did, and the pool is left as it
+    /// was.
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -1007,9 +1012,6 @@ impl Client {
 
         rx.await
             .map_err(|err| SetServerPoolError::with_source(SetServerPoolErrorKind::Send, err))?
-            .map_err(|err| {
-                SetServerPoolError::with_source(SetServerPoolErrorKind::MixedSchemes, err)
-            })
     }
 
     /// Returns a snapshot of the current server pool.
@@ -1189,6 +1191,10 @@ pub enum SetServerPoolErrorKind {
     MixedSchemes,
     /// The server pool cannot be empty.
     EmptyPool,
+    /// The pool holds a server URL this build or the client's settings cannot connect
+    /// to, as [`ConnectErrorKind::Configuration`](crate::ConnectErrorKind::Configuration)
+    /// would refuse it at connect. The pool is unchanged.
+    Configuration,
 }
 
 impl Display for SetServerPoolErrorKind {
@@ -1201,6 +1207,7 @@ impl Display for SetServerPoolErrorKind {
                 f,
                 "cannot mix websocket and non-websocket URLs in server pool"
             ),
+            Self::Configuration => write!(f, "configuration error"),
         }
     }
 }

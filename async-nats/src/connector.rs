@@ -33,6 +33,8 @@ use crate::ServerAddr;
 use crate::ServerError;
 use crate::ServerInfo;
 use crate::ServerOp;
+use crate::SetServerPoolError;
+use crate::SetServerPoolErrorKind;
 use crate::SocketAddr;
 use crate::ToServerAddrs;
 use crate::LANG;
@@ -227,6 +229,30 @@ fn without_user_info(addr: &ServerAddr) -> String {
     url.into()
 }
 
+/// The configuration error for a URL in `addrs` that this build or the client's settings
+/// cannot connect to, if there is one: a WebSocket URL in a build without the `websockets`
+/// feature, or a `ws://` URL while `tls_asked_by` names a setting or URL that asks for
+/// TLS. The server list at connect and a pool given later are checked alike.
+///
+/// A `ws://` URL cannot be upgraded: in WebSocket, TLS is fixed by the scheme before the
+/// opening handshake, so dialing `ws://` with TLS would replace the scheme the user wrote,
+/// and dialing it as written would leave out the TLS asked for.
+fn refused_url<'a>(
+    tls_asked_by: Option<&str>,
+    mut addrs: impl Iterator<Item = &'a ServerAddr> + Clone,
+) -> Option<String> {
+    #[cfg(not(feature = "websockets"))]
+    if addrs.clone().any(ServerAddr::is_websocket) {
+        return Some("a ws:// or wss:// URL needs the websockets feature of async-nats".into());
+    }
+    let asked_by = tls_asked_by?;
+    let addr = addrs.find(|addr| addr.scheme() == "ws")?;
+    Some(format!(
+        "{asked_by} asks for TLS, but {:?} is a ws:// URL; wss:// is the TLS form",
+        without_user_info(addr)
+    ))
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -256,29 +282,15 @@ impl Connector {
                 "tls_optional() cannot be set together with require_tls(true)",
             ));
         }
-        #[cfg(not(feature = "websockets"))]
-        if servers.iter().any(|server| server.addr.is_websocket()) {
+        let tls_asked_by = tls_asked_by(&options, &servers);
+        if let Some(message) = refused_url(
+            tls_asked_by.as_deref(),
+            servers.iter().map(|server| &server.addr),
+        ) {
             return Err(ConnectError::with_source(
                 ConnectErrorKind::Configuration,
-                "a ws:// or wss:// URL needs the websockets feature of async-nats",
+                message,
             ));
-        }
-
-        let tls_asked_by = tls_asked_by(&options, &servers);
-
-        // A ws:// URL cannot be upgraded: in WebSocket, TLS is fixed by the scheme before
-        // the opening handshake, so dialing ws:// with TLS would replace the scheme the
-        // user wrote, and dialing it as written would leave out the TLS asked for.
-        if let Some(asked_by) = &tls_asked_by {
-            if let Some(server) = servers.iter().find(|server| server.addr.scheme() == "ws") {
-                return Err(ConnectError::with_source(
-                    ConnectErrorKind::Configuration,
-                    format!(
-                        "{asked_by} asks for TLS, but {:?} is a ws:// URL; wss:// is the TLS form",
-                        without_user_info(&server.addr)
-                    ),
-                ));
-            }
         }
 
         Ok(Connector {
@@ -297,18 +309,32 @@ impl Connector {
     /// Replaces the server pool. Preserves per-server state for servers that
     /// appear in both the old and new pools.
     ///
-    /// Returns an error if the pool mixes WebSocket (`ws://`, `wss://`) and
-    /// non-websocket (`nats://`, `tls://`) schemes.
-    pub(crate) fn set_server_pool(&mut self, addrs: Vec<ServerAddr>) -> Result<(), String> {
+    /// Returns an error, and leaves the pool as it was, if the pool mixes WebSocket
+    /// (`ws://`, `wss://`) and non-websocket (`nats://`, `tls://`) schemes, or holds a
+    /// URL that the server list at connect would have been refused for: whether the
+    /// client asks for TLS was fixed at connect, so a `ws://` URL is refused when it did.
+    pub(crate) fn set_server_pool(
+        &mut self,
+        addrs: Vec<ServerAddr>,
+    ) -> Result<(), SetServerPoolError> {
         if addrs.is_empty() {
-            return Err("server pool cannot be empty".to_string());
+            return Err(SetServerPoolError::new(SetServerPoolErrorKind::EmptyPool));
         }
 
         // Validate: cannot mix websocket and non-websocket schemes.
         let has_ws = addrs.iter().any(|a| a.is_websocket());
         let has_non_ws = addrs.iter().any(|a| !a.is_websocket());
         if has_ws && has_non_ws {
-            return Err("cannot mix websocket and non-websocket URLs in server pool".to_string());
+            return Err(SetServerPoolError::new(
+                SetServerPoolErrorKind::MixedSchemes,
+            ));
+        }
+
+        if let Some(message) = refused_url(self.tls_asked_by.as_deref(), addrs.iter()) {
+            return Err(SetServerPoolError::with_source(
+                SetServerPoolErrorKind::Configuration,
+                message,
+            ));
         }
 
         let new_servers = addrs
