@@ -371,7 +371,8 @@ mod tls_options {
         let (canary_port, mut canary) = canary_offering_tls().await;
         let seed =
             FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{canary_port}")] })).await;
-        let canary_url = format!("nats://127.0.0.1:{canary_port}");
+        // The pool lists the canary, learned over TLS, as tls://.
+        let canary_url = format!("tls://127.0.0.1:{canary_port}");
 
         let client = steered_to(tls_options(), &canary_url)
             .connection_timeout(Duration::from_secs(2))

@@ -964,6 +964,16 @@ impl Client {
     /// Per-server state (failed attempt count, connection history) is preserved
     /// for servers that appear in both the old and new pools.
     ///
+    /// A server given in the pool is a configured server, also when the client discovered
+    /// it from the cluster: its certificate is verified as configured, not against a name
+    /// learned through discovery. One the client learned over TLS keeps TLS as long as
+    /// every pool given since lists it, unless
+    /// [`ConnectOptions::tls_optional`](crate::ConnectOptions::tls_optional) is set: each
+    /// URL is then dialed with its own scheme. A pool that leaves a server out drops what
+    /// the client learned about it. [`Client::server_pool`] lists a discovered server the
+    /// client learned over TLS with a `tls://` or `wss://` URL, so a pool made from that list
+    /// keeps TLS for it; without `tls_optional`, that URL then asks for TLS, as below.
+    ///
     /// This also resets the global reconnection attempt counter, so any
     /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
     /// is cleared.
@@ -1026,6 +1036,10 @@ impl Client {
     /// The returned list includes both explicitly configured and discovered
     /// servers, along with per-server metadata such as reconnect count and
     /// connection history.
+    ///
+    /// A discovered server is listed with the transport it was learned on, `nats://` or
+    /// `ws://`, and with `tls://` or `wss://` when the client learned it over TLS, so that the
+    /// list given back to [`Client::set_server_pool`] keeps TLS for it.
     ///
     /// # Examples
     /// ```no_run

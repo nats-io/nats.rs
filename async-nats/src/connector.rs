@@ -47,7 +47,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use std::borrow::Cow;
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -185,6 +185,25 @@ pub(crate) struct Connector {
     /// Holds the DNS name of the server through which the IP was discovered,
     /// so that the certificate check is not downgraded to the bare IP.
     tls_names: HashMap<ServerAddr, String>,
+    /// What the client learned about each discovered server, keyed by host and port.
+    discovered: HashMap<(String, u16), Discovered>,
+    /// Servers of the pool that keep TLS because the client learned them over TLS before a
+    /// pool listed them, and every pool since has listed them, keyed by host and port. Empty
+    /// under `tls_optional`.
+    kept_tls: HashSet<(String, u16)>,
+}
+
+/// What the client learned about a discovered server from the connections it was
+/// reported on.
+struct Discovered {
+    /// It was reported on a connection with TLS, so it is connected to with TLS. Once
+    /// set, it stays set.
+    tls: bool,
+}
+
+/// A server's host and port as written: two entries with the same key are one server.
+fn server_key(addr: &ServerAddr) -> (String, u16) {
+    (addr.host().to_owned(), addr.port())
 }
 
 pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
@@ -260,13 +279,15 @@ fn refused_url<'a>(
     ))
 }
 
-/// The address of a `connect_urls` entry, or why the entry is skipped.
+/// The address of a `connect_urls` entry learned on a websocket connection, or on a TCP
+/// connection, or why the entry is skipped. The address has the scheme of that transport,
+/// `ws` or `nats`; whether it gets TLS is not the scheme's to say.
 ///
 /// nats-server writes an entry as `host:port`, with an IPv6 address in brackets. User info
 /// in an entry is dropped: the server is connected to with the client's own credentials. An
 /// entry with a scheme is skipped rather than reduced to `host:port`, and so is anything
 /// else that is not `host:port`.
-fn discovered_addr(entry: &str) -> Result<ServerAddr, &'static str> {
+fn discovered_addr(entry: &str, websocket: bool) -> Result<ServerAddr, &'static str> {
     const NOT_HOST_PORT: &str = "it is not host:port";
     if entry.contains("://") {
         return Err("it has a scheme");
@@ -279,7 +300,8 @@ fn discovered_addr(entry: &str) -> Result<ServerAddr, &'static str> {
                 && url.query().is_none()
                 && url.fragment().is_none() =>
         {
-            format!("nats://{host}:{port}")
+            let scheme = if websocket { "ws" } else { "nats" };
+            format!("{scheme}://{host}:{port}")
                 .parse()
                 .map_err(|_| NOT_HOST_PORT)
         }
@@ -348,11 +370,16 @@ impl Connector {
             connect_stats,
             last_info: ServerInfo::default(),
             tls_names: HashMap::new(),
+            discovered: HashMap::new(),
+            kept_tls: HashSet::new(),
         })
     }
 
     /// Replaces the server pool. Preserves per-server state for servers that
-    /// appear in both the old and new pools.
+    /// appear in both the old and new pools. Every server in the new pool is a configured
+    /// server, verified as its URL says. One the client learned over TLS keeps TLS as long
+    /// as every pool given since lists it, unless `tls_optional` is set: a pool URL then
+    /// keeps its own scheme.
     ///
     /// A `tls://` or `wss://` URL in the pool asks for TLS as it does at connect, unless
     /// `tls_optional` is set: every later attempt uses TLS, and a later pool does not turn
@@ -384,10 +411,12 @@ impl Connector {
             addrs
                 .iter()
                 .find(|addr| !self.options.tls_optional && url_asks_for_tls(addr))
+                // A URL that server_pool() listed can carry a host the server chose: it is
+                // cut and escaped.
                 .map(|addr| {
                     format!(
-                        "the URL {:?} given to set_server_pool()",
-                        without_user_info(addr)
+                        "the URL {} given to set_server_pool()",
+                        quoted(&without_user_info(addr))
                     )
                     .into()
                 })
@@ -400,10 +429,12 @@ impl Connector {
         }
         self.tls_asked_by = tls_asked_by;
 
+        // A server keeps its state when the new pool lists it as server_pool() did.
+        let listed = self.server_pool();
         let new_servers = addrs
             .into_iter()
             .map(|addr| {
-                if let Some(existing) = self.servers.iter().find(|s| s.addr == addr) {
+                if let Some(existing) = listed.iter().find(|s| s.addr == addr) {
                     Server {
                         addr,
                         failed_attempts: existing.failed_attempts,
@@ -417,16 +448,113 @@ impl Connector {
             })
             .collect();
         self.servers = new_servers;
-        let servers = &self.servers;
-        self.tls_names
-            .retain(|addr, _| servers.iter().any(|s| &s.addr == addr));
+        if !self.options.tls_optional {
+            // A ws:// URL is dialed as written, also when a TCP server with its host and port
+            // was learned over TLS: without tls_optional, a WebSocket connection has TLS only
+            // when the client asks for TLS, and a ws:// URL is then refused.
+            self.kept_tls = self
+                .servers
+                .iter()
+                .filter(|server| !server.addr.is_websocket())
+                .map(|server| server_key(&server.addr))
+                .filter(|key| {
+                    self.kept_tls.contains(key)
+                        || self
+                            .discovered
+                            .get(key)
+                            .is_some_and(|discovered| discovered.tls)
+                })
+                .collect();
+        }
+        self.tls_names.clear();
+        self.discovered.clear();
         self.attempts = 0;
         Ok(())
     }
 
-    /// Returns a snapshot of the current server pool.
+    /// Returns a snapshot of the current server pool, each server as `listed_addr` gives it.
     pub(crate) fn server_pool(&self) -> Vec<Server> {
-        self.servers.to_vec()
+        self.servers
+            .iter()
+            .map(|server| Server {
+                addr: self.listed_addr(&server.addr),
+                ..server.clone()
+            })
+            .collect()
+    }
+
+    /// `addr` as the pool is listed: a discovered server learned over TLS with the TLS form
+    /// of its scheme, `tls://` or `wss://`, so that a pool made from the list keeps TLS for
+    /// it, also under `tls_optional`. Other servers as they are.
+    fn listed_addr(&self, addr: &ServerAddr) -> ServerAddr {
+        let learned_over_tls = self
+            .discovered
+            .get(&server_key(addr))
+            .is_some_and(|discovered| discovered.tls);
+        if !learned_over_tls {
+            return addr.clone();
+        }
+        let mut url = addr.clone().into_inner();
+        // nats and tls are both non-special schemes, ws and wss both special: the change
+        // cannot fail, and the URL stays a server address. The URL holds no default port,
+        // such as 80 for ws, so the port is set again to stay the same.
+        let _ = url.set_scheme(if addr.is_websocket() { "wss" } else { "tls" });
+        let _ = url.set_port(Some(addr.port()));
+        ServerAddr::from_url(url).unwrap_or_else(|_| addr.clone())
+    }
+
+    /// Whether `addr` was learned on a connection with TLS and keeps TLS for it: as a
+    /// discovered server, or as a server of the pool in `kept_tls`.
+    fn learned_over_tls(&self, addr: &ServerAddr) -> bool {
+        let key = server_key(addr);
+        self.kept_tls.contains(&key)
+            || self
+                .discovered
+                .get(&key)
+                .is_some_and(|discovered| discovered.tls)
+    }
+
+    /// Adds the servers in `connect_urls`, learned on a connection to `reporter` that has
+    /// TLS when `tls` is set, to the pool as discovered servers.
+    ///
+    /// A discovered server is connected to with the transport of the connection it was
+    /// learned on, and with TLS when that connection had TLS. Learned again on a
+    /// connection with TLS, it gains TLS, and it never loses it. Two entries are one
+    /// server when host and port match as written; an entry that is a configured server
+    /// changes nothing about it.
+    fn add_discovered_servers(
+        &mut self,
+        connect_urls: &[String],
+        reporter: &ServerAddr,
+        tls: bool,
+        tls_name: &str,
+    ) {
+        for url in connect_urls {
+            let discovered_addr = match discovered_addr(url, reporter.is_websocket()) {
+                Ok(addr) => addr,
+                Err(reason) => {
+                    tracing::warn!("skipping the connect_urls entry {}: {reason}", quoted(url));
+                    continue;
+                }
+            };
+            let key = server_key(&discovered_addr);
+            if let Some(discovered) = self.discovered.get_mut(&key) {
+                discovered.tls |= tls;
+            } else if !self.servers.iter().any(|s| server_key(&s.addr) == key) {
+                tracing::debug!(
+                    discovered_url = discovered_addr.as_url_str(),
+                    "adding discovered server"
+                );
+                if discovered_addr.host().parse::<IpAddr>().is_ok()
+                    && tls_name.parse::<IpAddr>().is_err()
+                {
+                    self.tls_names
+                        .insert(discovered_addr.clone(), tls_name.to_owned());
+                }
+                self.discovered.insert(key, Discovered { tls });
+                self.servers.push(Server::new_discovered(discovered_addr));
+            }
+        }
     }
 
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
@@ -466,13 +594,20 @@ impl Connector {
 
         // If a reconnect-to-server callback is set, try it first.
         if let Some(ref callback) = self.options.reconnect_to_server_callback {
-            let pool_snapshot = self.servers.to_vec();
+            let pool_snapshot = self.server_pool();
             let info_snapshot = self.last_info.clone();
             let selection = callback.call((pool_snapshot, info_snapshot)).await;
 
             if let Some(target) = selection {
-                // Validate the selected server is in the pool.
-                if self.servers.iter().any(|s| s.addr == target.addr) {
+                // Validate the selected server is in the pool as the snapshot lists it, and
+                // connect to it by the address the pool keeps for it.
+                let selected = self
+                    .servers
+                    .iter()
+                    .map(|server| &server.addr)
+                    .find(|addr| self.listed_addr(addr) == target.addr)
+                    .cloned();
+                if let Some(addr) = selected {
                     self.attempts += 1;
                     if let Some(max_reconnects) = self.options.max_reconnects {
                         if self.attempts > max_reconnects {
@@ -493,7 +628,7 @@ impl Connector {
                         sleep(delay).await;
                     }
 
-                    match self.try_connect_to_server(&target.addr).await {
+                    match self.try_connect_to_server(&addr).await {
                         Ok(result) => return Ok(result),
                         Err(inner) => match inner.kind() {
                             ConnectErrorKind::AuthorizationViolation
@@ -594,15 +729,13 @@ impl Connector {
             .await
             .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Dns, err))?;
 
+        // A server learned on a connection with TLS keeps TLS, whatever its INFO says.
+        let tls_required = server_addr.tls_required() || self.learned_over_tls(server_addr);
         let mut last_err = None;
         for socket_addr in socket_addrs {
             match tokio::time::timeout(
                 self.options.connection_timeout,
-                self.try_connect_to(
-                    &socket_addr,
-                    server_addr.tls_required(),
-                    server_addr.clone(),
-                ),
+                self.try_connect_to(&socket_addr, tls_required, server_addr.clone()),
             )
             .await
             {
@@ -710,13 +843,18 @@ impl Connector {
         };
         tcp_stream.set_nodelay(true)?;
 
+        // Whether this connection has TLS: the servers it reports are learned over TLS.
+        let mut tls = self.options.tls_first && !server_addr.is_websocket();
         let mut connection = match server_addr.scheme() {
             // The websocket handshake runs on the client's own stream, so every resolved
-            // address is tried, and TLS sits below the websocket framing as the scheme says:
-            // a wss:// URL gets the same handshake as a tls:// URL, a ws:// URL none.
+            // address is tried, and TLS sits below the websocket framing: a wss:// URL gets
+            // the same handshake as a tls:// URL, and so does a ws:// server learned over
+            // TLS or while the client asks for TLS. A ws:// URL the user gave is refused
+            // at connect, or by set_server_pool(), when the client asks for TLS.
             #[cfg(feature = "websockets")]
             "ws" | "wss" => {
-                let stream: Box<dyn AsyncReadWrite> = if server_addr.scheme() == "wss" {
+                tls = server_addr.scheme() == "wss" || tls_required || self.tls_asked_by.is_some();
+                let stream: Box<dyn AsyncReadWrite> = if tls {
                     Box::new(self.tls_handshake(tcp_stream, server_addr.host()).await?)
                 } else {
                     Box::new(tcp_stream)
@@ -802,16 +940,19 @@ impl Connector {
             if !info.tls_required && !info.tls_available {
                 let server = format!("{:?}", without_user_info(&server_addr));
                 let message = match &self.tls_asked_by {
-                    Some(asked_by) if !server_addr.tls_required() => format!(
+                    Some(asked_by) if !tls_required => format!(
                         "{asked_by} asks for TLS, but {server} does not offer it; \
                          tls_optional() leaves TLS to each server"
                     ),
                     Some(asked_by) => {
                         format!("{asked_by} asks for TLS, but {server} does not offer it")
                     }
-                    None => {
+                    None if server_addr.tls_required() => {
                         format!("the URL {server} asks for TLS, but {server} does not offer it")
                     }
+                    None => format!(
+                        "{server} was discovered on a connection with TLS, but does not offer it"
+                    ),
                 };
                 return Err(ConnectError::with_source(
                     crate::ConnectErrorKind::Tls,
@@ -819,36 +960,16 @@ impl Connector {
                 ));
             }
             connection = tls_connection(connection).await?;
+            tls = true;
         };
 
         // Discover servers from INFO.
         if !self.options.ignore_discovered_servers {
-            for url in &info.connect_urls {
-                let discovered_addr = match discovered_addr(url) {
-                    Ok(addr) => addr,
-                    Err(reason) => {
-                        tracing::warn!("skipping the connect_urls entry {}: {reason}", quoted(url));
-                        continue;
-                    }
-                };
-                if !self.servers.iter().any(|s| s.addr == discovered_addr) {
-                    tracing::debug!(
-                        discovered_url = discovered_addr.as_url_str(),
-                        "adding discovered server"
-                    );
-                    if discovered_addr.host().parse::<IpAddr>().is_ok()
-                        && tls_name.parse::<IpAddr>().is_err()
-                    {
-                        self.tls_names
-                            .insert(discovered_addr.clone(), tls_name.clone());
-                    }
-                    self.servers.push(Server::new_discovered(discovered_addr));
-                }
-            }
+            self.add_discovered_servers(&info.connect_urls, &server_addr, tls, &tls_name);
         }
 
         // Build CONNECT message with auth info.
-        let tls_required = self.tls_asked_by.is_some() || server_addr.tls_required();
+        let tls_required = self.tls_asked_by.is_some() || tls_required;
         let mut connect_info = ConnectInfo {
             tls_required,
             name: self.options.name.clone(),
@@ -1111,7 +1232,7 @@ mod tests {
                 "nats.example.com",
             ),
         ] {
-            let addr = discovered_addr(entry).unwrap();
+            let addr = discovered_addr(entry, false).unwrap();
             assert_eq!(addr.as_url_str(), url, "{entry}");
             assert_eq!(addr.host(), host, "{entry}");
             assert_eq!(addr.username(), None, "{entry}");
@@ -1126,7 +1247,7 @@ mod tests {
             "nats://derek:porkchop@127.0.0.1:4222",
         ] {
             assert_eq!(
-                discovered_addr(entry).unwrap_err(),
+                discovered_addr(entry, false).unwrap_err(),
                 "it has a scheme",
                 "{entry}"
             );
@@ -1148,11 +1269,332 @@ mod tests {
             "a b:4222",
         ] {
             assert_eq!(
-                discovered_addr(entry).unwrap_err(),
+                discovered_addr(entry, false).unwrap_err(),
                 "it is not host:port",
                 "{entry:?}"
             );
         }
+    }
+
+    fn connector(urls: &[&str], options: ConnectorOptions) -> Connector {
+        let (events_tx, _) = tokio::sync::mpsc::channel(1);
+        let (state_tx, _) = tokio::sync::watch::channel(State::Pending);
+        Connector::new(
+            urls,
+            options,
+            events_tx,
+            state_tx,
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(Statistics::default()),
+        )
+        .unwrap()
+    }
+
+    fn addr(url: &str) -> ServerAddr {
+        url.parse().unwrap()
+    }
+
+    fn pool(connector: &Connector) -> Vec<&str> {
+        connector
+            .servers
+            .iter()
+            .map(|server| server.addr.as_url_str())
+            .collect()
+    }
+
+    /// The URLs `server_pool()` lists.
+    fn listed(connector: &Connector) -> Vec<String> {
+        connector
+            .server_pool()
+            .iter()
+            .map(|server| server.addr.as_url_str().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn discovered_servers_keep_the_transport_and_tls_they_were_learned_on() {
+        // The WebSocket reporter is not configured: a build without the websockets feature
+        // refuses a ws:// URL at connect.
+        let mut connector = connector(&["nats://seed.example:4222"], options());
+        let (tcp, ws) = (
+            addr("nats://seed.example:4222"),
+            addr("ws://seed.example:8080"),
+        );
+
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &tcp, false, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.3:4222".into()], &tcp, true, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.4:8080".into()], &ws, false, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.5:8080".into()], &ws, true, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.6:80".into()], &ws, true, "seed.example");
+
+        assert_eq!(
+            pool(&connector)[1..],
+            [
+                "nats://10.0.0.2:4222",
+                "nats://10.0.0.3:4222",
+                "ws://10.0.0.4:8080/",
+                "ws://10.0.0.5:8080/",
+                "ws://10.0.0.6/",
+            ]
+        );
+        for (url, tls) in [
+            ("nats://10.0.0.2:4222", false),
+            ("nats://10.0.0.3:4222", true),
+            ("ws://10.0.0.4:8080", false),
+            ("ws://10.0.0.5:8080", true),
+            ("ws://10.0.0.6:80", true),
+        ] {
+            assert_eq!(connector.learned_over_tls(&addr(url)), tls, "{url}");
+        }
+        // server_pool() lists a server learned over TLS with the TLS form of its scheme, on
+        // the same port: ws:// on port 80 becomes wss:// on port 80.
+        assert_eq!(
+            listed(&connector)[1..],
+            [
+                "nats://10.0.0.2:4222",
+                "tls://10.0.0.3:4222",
+                "ws://10.0.0.4:8080/",
+                "wss://10.0.0.5:8080/",
+                "wss://10.0.0.6:80/",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_discovered_server_gains_tls_and_never_loses_it() {
+        let mut connector = connector(&["nats://seed.example:4222"], options());
+        let seed = addr("nats://seed.example:4222");
+        let discovered = addr("nats://10.0.0.2:4222");
+
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false, "seed.example");
+        assert!(!connector.learned_over_tls(&discovered));
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true, "seed.example");
+        assert!(connector.learned_over_tls(&discovered));
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false, "seed.example");
+        assert!(connector.learned_over_tls(&discovered));
+        assert_eq!(
+            pool(&connector),
+            ["nats://seed.example:4222", "nats://10.0.0.2:4222"]
+        );
+        // Once it has gained TLS, it is listed with it.
+        assert_eq!(
+            listed(&connector),
+            ["nats://seed.example:4222", "tls://10.0.0.2:4222"]
+        );
+    }
+
+    #[test]
+    fn a_server_given_in_a_pool_is_verified_as_configured() {
+        // Under tls_optional, a server learned over TLS and then given in a pool as nats://
+        // is dialed as its URL says, also after a later report over TLS.
+        let mut optional = connector(
+            &["tls://nats.example.com:4222"],
+            ConnectorOptions {
+                tls_optional: true,
+                ..options()
+            },
+        );
+        let seed = addr("tls://nats.example.com:4222");
+        optional.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true, "nats.example.com");
+        optional
+            .set_server_pool(vec![addr("nats://10.0.0.2:4222")])
+            .unwrap();
+        assert!(!optional.learned_over_tls(&addr("nats://10.0.0.2:4222")));
+        optional.add_discovered_servers(
+            &["10.0.0.2:4222".into()],
+            &addr("nats://10.0.0.2:4222"),
+            true,
+            "10.0.0.2",
+        );
+        assert!(!optional.learned_over_tls(&addr("nats://10.0.0.2:4222")));
+    }
+
+    #[test]
+    fn a_pool_made_from_the_listed_pool_keeps_the_state_of_each_server() {
+        let seed = addr("nats://seed.example.com:4222");
+        let learned = || {
+            let mut learned = connector(&["nats://seed.example.com:4222"], options());
+            learned.add_discovered_servers(
+                &["10.0.0.2:4222".into()],
+                &seed,
+                true,
+                "seed.example.com",
+            );
+            for server in &mut learned.servers {
+                server.failed_attempts = 2;
+                server.did_connect = true;
+                server.last_error = Some("timed out".into());
+            }
+            learned
+        };
+        let state = |server: &Server| {
+            (
+                server.failed_attempts,
+                server.did_connect,
+                server.last_error.clone(),
+            )
+        };
+        let kept = (2, true, Some("timed out".to_string()));
+
+        // Given back as listed, every server keeps its state.
+        let mut round_trip = learned();
+        let listed = round_trip
+            .server_pool()
+            .into_iter()
+            .map(|server| server.addr)
+            .collect();
+        round_trip.set_server_pool(listed).unwrap();
+        assert_eq!(
+            pool(&round_trip),
+            ["nats://seed.example.com:4222", "tls://10.0.0.2:4222"]
+        );
+        assert_eq!(
+            round_trip.servers.iter().map(state).collect::<Vec<_>>(),
+            [kept.clone(), kept.clone()]
+        );
+
+        // The address the pool kept for it is another URL than the listed one: given in a
+        // pool, it starts afresh.
+        let mut by_stored_url = learned();
+        by_stored_url
+            .set_server_pool(vec![seed.clone(), addr("nats://10.0.0.2:4222")])
+            .unwrap();
+        assert_eq!(
+            by_stored_url.servers.iter().map(state).collect::<Vec<_>>(),
+            [kept, (0, false, None)]
+        );
+    }
+
+    #[test]
+    fn a_server_given_in_a_pool_keeps_the_tls_it_was_learned_with() {
+        let seed = addr("nats://seed.example.com:4222");
+        let learned = || {
+            let mut learned = connector(&["nats://seed.example.com:4222"], options());
+            learned.add_discovered_servers(
+                &["10.0.0.2:4222".into()],
+                &seed,
+                true,
+                "seed.example.com",
+            );
+            learned.add_discovered_servers(
+                &["10.0.0.3:4222".into()],
+                &seed,
+                false,
+                "seed.example.com",
+            );
+            learned
+        };
+        let (with_tls, without_tls) = (addr("nats://10.0.0.2:4222"), addr("nats://10.0.0.3:4222"));
+
+        // Without tls_optional, the pool that server_pool() lists keeps TLS for the server
+        // learned over TLS, and its tls:// URL asks for TLS for every server.
+        let mut round_trip = learned();
+        let listed = round_trip
+            .server_pool()
+            .into_iter()
+            .map(|server| server.addr)
+            .collect();
+        round_trip.set_server_pool(listed).unwrap();
+        assert!(round_trip.tls_asked_by.is_some());
+        assert!(round_trip.learned_over_tls(&with_tls));
+        assert!(!round_trip.learned_over_tls(&without_tls));
+
+        // Given as nats:// to a client that does not ask for TLS, it keeps TLS as long as every
+        // pool given since lists it.
+        let mut connector = learned();
+        connector
+            .set_server_pool(vec![seed.clone(), with_tls.clone()])
+            .unwrap();
+        assert!(connector.tls_asked_by.is_none());
+        assert!(connector.learned_over_tls(&with_tls));
+        connector
+            .set_server_pool(vec![seed.clone(), with_tls.clone()])
+            .unwrap();
+        assert!(connector.learned_over_tls(&with_tls));
+        connector.set_server_pool(vec![seed.clone()]).unwrap();
+        assert!(!connector.learned_over_tls(&with_tls));
+        // A pool that left the server out dropped what the client learned about it.
+        connector
+            .set_server_pool(vec![seed, with_tls.clone()])
+            .unwrap();
+        assert!(!connector.learned_over_tls(&with_tls));
+    }
+
+    #[test]
+    fn quotes_the_pool_url_that_asks_for_tls_cut_at_256_bytes() {
+        // The host of a server learned over TLS, which the pool lists as tls://, is one the
+        // server chose.
+        let mut connector = connector(&["nats://seed.example.com:4222"], options());
+        let host = "h".repeat(300);
+        connector.add_discovered_servers(
+            &[format!("{host}:4222")],
+            &addr("nats://seed.example.com:4222"),
+            true,
+            "seed.example.com",
+        );
+
+        let listed = connector
+            .server_pool()
+            .into_iter()
+            .map(|server| server.addr)
+            .collect();
+        connector.set_server_pool(listed).unwrap();
+
+        let url = quoted(&format!("tls://{host}:4222"));
+        assert_eq!(
+            connector.tls_asked_by.as_deref(),
+            Some(format!("the URL {url} given to set_server_pool()").as_str())
+        );
+    }
+
+    #[cfg(feature = "websockets")]
+    #[test]
+    fn a_ws_url_given_in_a_pool_is_dialed_as_written() {
+        // Also when a TCP server with the same host and port was learned over TLS.
+        let mut connector = connector(&["nats://seed.example.com:4222"], options());
+        let seed = addr("nats://seed.example.com:4222");
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into()],
+            &seed,
+            true,
+            "seed.example.com",
+        );
+        let ws = addr("ws://10.0.0.2:4222");
+        connector.set_server_pool(vec![ws.clone()]).unwrap();
+        assert!(!connector.learned_over_tls(&ws));
+    }
+
+    #[test]
+    fn an_entry_for_a_known_server_adds_nothing() {
+        // A configured URL without a port counts with the port it is dialed on.
+        let mut connector = connector(
+            &["nats://seed.example", "tls://other.example:4223"],
+            options(),
+        );
+        let seed = addr("nats://seed.example");
+
+        connector.add_discovered_servers(
+            &[
+                "seed.example:4222".into(),
+                "other.example:4223".into(),
+                "10.0.0.2:4222".into(),
+                "derek@10.0.0.2:4222".into(),
+            ],
+            &seed,
+            true,
+            "seed.example",
+        );
+
+        assert_eq!(
+            pool(&connector),
+            [
+                "nats://seed.example",
+                "tls://other.example:4223",
+                "nats://10.0.0.2:4222"
+            ]
+        );
+        // A configured server keeps how the user configured it.
+        assert!(!connector.learned_over_tls(&seed));
     }
 
     #[test]
