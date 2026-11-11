@@ -59,6 +59,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::time::sleep;
 use tokio_rustls::rustls;
+use url::Url;
 
 /// Metadata about a server in the connection pool.
 ///
@@ -257,6 +258,43 @@ fn refused_url<'a>(
         "{asked_by} asks for TLS, but {:?} is a ws:// URL; wss:// is the TLS form",
         without_user_info(addr)
     ))
+}
+
+/// The address of a `connect_urls` entry, or why the entry is skipped.
+///
+/// nats-server writes an entry as `host:port`, with an IPv6 address in brackets. User info
+/// in an entry is dropped: the server is connected to with the client's own credentials. An
+/// entry with a scheme is skipped rather than reduced to `host:port`, and so is anything
+/// else that is not `host:port`.
+fn discovered_addr(entry: &str) -> Result<ServerAddr, &'static str> {
+    const NOT_HOST_PORT: &str = "it is not host:port";
+    if entry.contains("://") {
+        return Err("it has a scheme");
+    }
+    let url = Url::parse(&format!("nats://{entry}")).map_err(|_| NOT_HOST_PORT)?;
+    match (url.host_str(), url.port()) {
+        (Some(host), Some(port))
+            if !host.is_empty()
+                && url.path().is_empty()
+                && url.query().is_none()
+                && url.fragment().is_none() =>
+        {
+            format!("nats://{host}:{port}")
+                .parse()
+                .map_err(|_| NOT_HOST_PORT)
+        }
+        _ => Err(NOT_HOST_PORT),
+    }
+}
+
+/// A `connect_urls` entry as a log line quotes it: cut at 256 bytes and escaped, since the
+/// server chose it.
+fn quoted(entry: &str) -> String {
+    let mut end = entry.len().min(256);
+    while !entry.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{:?}", &entry[..end])
 }
 
 impl Connector {
@@ -786,12 +824,16 @@ impl Connector {
         // Discover servers from INFO.
         if !self.options.ignore_discovered_servers {
             for url in &info.connect_urls {
-                let discovered_addr = url.parse::<ServerAddr>().map_err(|err| {
-                    ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                })?;
+                let discovered_addr = match discovered_addr(url) {
+                    Ok(addr) => addr,
+                    Err(reason) => {
+                        tracing::warn!("skipping the connect_urls entry {}: {reason}", quoted(url));
+                        continue;
+                    }
+                };
                 if !self.servers.iter().any(|s| s.addr == discovered_addr) {
                     tracing::debug!(
-                        discovered_url = %url,
+                        discovered_url = discovered_addr.as_url_str(),
                         "adding discovered server"
                     );
                     if discovered_addr.host().parse::<IpAddr>().is_ok()
@@ -1044,6 +1086,82 @@ mod tests {
         };
         let mixed = servers(&["nats://localhost:4222", "tls://localhost:4223"]);
         assert_eq!(tls_asked_by(&options, &mixed), None);
+    }
+
+    #[test]
+    fn connect_urls_entries_are_host_port() {
+        for (entry, url, host) in [
+            ("127.0.0.1:4222", "nats://127.0.0.1:4222", "127.0.0.1"),
+            ("[::1]:4222", "nats://[::1]:4222", "::1"),
+            (
+                "nats.example.com:4222",
+                "nats://nats.example.com:4222",
+                "nats.example.com",
+            ),
+            // User info is dropped; the host it was written in front of is used.
+            (
+                "derek:porkchop@127.0.0.1:4222",
+                "nats://127.0.0.1:4222",
+                "127.0.0.1",
+            ),
+            ("token@[::1]:4222", "nats://[::1]:4222", "::1"),
+            (
+                "@nats.example.com:4222",
+                "nats://nats.example.com:4222",
+                "nats.example.com",
+            ),
+        ] {
+            let addr = discovered_addr(entry).unwrap();
+            assert_eq!(addr.as_url_str(), url, "{entry}");
+            assert_eq!(addr.host(), host, "{entry}");
+            assert_eq!(addr.username(), None, "{entry}");
+            assert_eq!(addr.password(), None, "{entry}");
+        }
+
+        for entry in [
+            "nats://127.0.0.1:4222",
+            "tls://127.0.0.1:4222",
+            "ws://127.0.0.1:4222",
+            "WSS://127.0.0.1:4222",
+            "nats://derek:porkchop@127.0.0.1:4222",
+        ] {
+            assert_eq!(
+                discovered_addr(entry).unwrap_err(),
+                "it has a scheme",
+                "{entry}"
+            );
+        }
+
+        for entry in [
+            "",
+            "127.0.0.1",
+            "127.0.0.1:",
+            ":4222",
+            "127.0.0.1:4222/",
+            "127.0.0.1:4222/path",
+            "127.0.0.1:4222?x=1",
+            "127.0.0.1:4222#x",
+            "127.0.0.1:99999",
+            "::::",
+            "[::1",
+            "[::1]",
+            "a b:4222",
+        ] {
+            assert_eq!(
+                discovered_addr(entry).unwrap_err(),
+                "it is not host:port",
+                "{entry:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn skipped_entries_are_quoted_escaped_and_cut() {
+        assert_eq!(quoted("a\r\n\u{1b}[31mb\"c"), r#""a\r\n\u{1b}[31mb\"c""#);
+        assert_eq!(quoted(&"x".repeat(300)), format!("{:?}", "x".repeat(256)));
+        // Cut at a character boundary, never inside a character.
+        let entry = format!("{}\u{e9}", "x".repeat(255));
+        assert_eq!(quoted(&entry), format!("{:?}", "x".repeat(255)));
     }
 
     #[test]
