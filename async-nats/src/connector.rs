@@ -309,10 +309,15 @@ impl Connector {
     /// Replaces the server pool. Preserves per-server state for servers that
     /// appear in both the old and new pools.
     ///
-    /// Returns an error, and leaves the pool as it was, if the pool mixes WebSocket
-    /// (`ws://`, `wss://`) and non-websocket (`nats://`, `tls://`) schemes, or holds a
-    /// URL that the server list at connect would have been refused for: whether the
-    /// client asks for TLS was fixed at connect, so a `ws://` URL is refused when it did.
+    /// A `tls://` or `wss://` URL in the pool asks for TLS as it does at connect, unless
+    /// `tls_optional` is set: every later attempt uses TLS, and a later pool does not turn
+    /// it off.
+    ///
+    /// Returns an error, and leaves the pool and whether the client asks for TLS as they
+    /// were, if the pool mixes WebSocket (`ws://`, `wss://`) and non-websocket (`nats://`,
+    /// `tls://`) schemes, or holds a URL that the server list at connect would have been
+    /// refused for: a `ws://` URL is refused when the client asks for TLS, or would once
+    /// the pool is taken.
     pub(crate) fn set_server_pool(
         &mut self,
         addrs: Vec<ServerAddr>,
@@ -330,12 +335,25 @@ impl Connector {
             ));
         }
 
-        if let Some(message) = refused_url(self.tls_asked_by.as_deref(), addrs.iter()) {
+        let tls_asked_by = self.tls_asked_by.clone().or_else(|| {
+            addrs
+                .iter()
+                .find(|addr| !self.options.tls_optional && url_asks_for_tls(addr))
+                .map(|addr| {
+                    format!(
+                        "the URL {:?} given to set_server_pool()",
+                        without_user_info(addr)
+                    )
+                    .into()
+                })
+        });
+        if let Some(message) = refused_url(tls_asked_by.as_deref(), addrs.iter()) {
             return Err(SetServerPoolError::with_source(
                 SetServerPoolErrorKind::Configuration,
                 message,
             ));
         }
+        self.tls_asked_by = tls_asked_by;
 
         let new_servers = addrs
             .into_iter()

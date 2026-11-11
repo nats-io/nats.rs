@@ -968,10 +968,17 @@ impl Client {
     /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
     /// is cleared.
     ///
-    /// The pool is checked as the server list at connect is. Whether the client asks
-    /// for TLS was fixed at connect, so a `ws://` URL is refused with
-    /// [`SetServerPoolErrorKind::Configuration`] when it did, and the pool is left as it
-    /// was.
+    /// A `tls://` or `wss://` URL in the pool makes the client ask for TLS, as the same URL
+    /// does at connect: from the next attempt on, every server is dialed with TLS, the
+    /// other URLs of the pool and the servers discovered from the cluster included. The
+    /// current connection is not closed. A later pool without such a URL does not turn TLS
+    /// off. With [`ConnectOptions::tls_optional`](crate::ConnectOptions::tls_optional) set,
+    /// such a URL gets TLS for itself only, as at connect.
+    ///
+    /// The pool is checked as the server list at connect is. When the client asks for TLS,
+    /// or would with the new pool, a `ws://` URL is refused with
+    /// [`SetServerPoolErrorKind::Configuration`]; the pool and whether the client asks for
+    /// TLS are left as they were.
     ///
     /// # Examples
     /// ```no_run

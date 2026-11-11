@@ -289,6 +289,23 @@ mod tls_options {
         }
     }
 
+    /// Sends every reconnect to `url` once the pool holds it, after a short delay.
+    fn steered_to(options: ConnectOptions, url: &str) -> ConnectOptions {
+        let url = url.to_string();
+        options
+            .reconnect_delay_callback(|_| Duration::from_millis(50))
+            .reconnect_to_server_callback(move |servers, _| {
+                let target = servers
+                    .into_iter()
+                    .find(|server| server.addr.as_url_str() == url)
+                    .map(|server| async_nats::ReconnectToServer {
+                        addr: server.addr,
+                        delay: None,
+                    });
+                async move { target }
+            })
+    }
+
     // A CA, a client certificate or a TLS client config asks for TLS, so a `nats://` URL
     // is connected to with TLS. The INFO of the server does not require TLS; that does
     // not turn it off.
@@ -356,21 +373,7 @@ mod tls_options {
             FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{canary_port}")] })).await;
         let canary_url = format!("nats://127.0.0.1:{canary_port}");
 
-        let client = tls_options()
-            .reconnect_delay_callback(|_| Duration::from_millis(50))
-            .reconnect_to_server_callback({
-                let canary_url = canary_url.clone();
-                move |servers, _| {
-                    let target = servers
-                        .into_iter()
-                        .find(|server| server.addr.as_url_str() == canary_url)
-                        .map(|server| async_nats::ReconnectToServer {
-                            addr: server.addr,
-                            delay: None,
-                        });
-                    async move { target }
-                }
-            })
+        let client = steered_to(tls_options(), &canary_url)
             .connection_timeout(Duration::from_secs(2))
             .connect(format!("tls://localhost:{}", seed.port))
             .await
@@ -584,10 +587,9 @@ mod tls_options {
         assert_eq!(seen, vec![Seen::PlaintextWebsocket]);
     }
 
-    // A pool given after connect is checked as the list at connect was: whether the client
-    // asks for TLS was fixed then, so a ws:// URL fails the call that sets the pool, which
-    // names the URL without its user info, the setting and the wss:// form, and leaves the
-    // pool as it was.
+    // A pool given after connect is checked as the list at connect was: the client asks for
+    // TLS, so a ws:// URL fails the call that sets the pool, which names the URL without its
+    // user info, the setting and the wss:// form, and leaves the pool as it was.
     #[cfg(feature = "websockets")]
     #[tokio::test]
     async fn set_server_pool_refuses_a_ws_url_when_tls_is_asked_for() {
@@ -636,6 +638,126 @@ mod tls_options {
         assert_eq!(
             pool.iter().map(|server| &server.addr).collect::<Vec<_>>(),
             vec![&url]
+        );
+    }
+
+    // A tls:// URL in a pool given after connect asks for TLS, as it does at connect. The
+    // current connection stays up; from the next attempt on, the nats:// URL next to it is
+    // connected to with TLS too.
+    #[tokio::test]
+    async fn set_server_pool_with_a_tls_url_uses_tls_for_the_whole_pool() {
+        let server = nats_server::run_basic_server();
+        let (port, mut canary) = canary_offering_tls().await;
+        let canary_url = format!("nats://127.0.0.1:{port}");
+        let client = steered_to(ConnectOptions::new(), &canary_url)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client
+            .set_server_pool(vec!["tls://127.0.0.1:1".to_string(), canary_url])
+            .await
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(2), client.flush())
+            .await
+            .unwrap()
+            .unwrap();
+        client.force_reconnect().await.unwrap();
+        let seen = seen_during(&mut canary, Duration::from_secs(2)).await;
+        assert!(
+            !seen.is_empty() && seen.iter().all(|seen| *seen == Seen::TlsHandshake),
+            "{seen:?}"
+        );
+    }
+
+    // Once a pool has asked for TLS, a later pool without a tls:// URL does not turn it off.
+    #[tokio::test]
+    async fn set_server_pool_without_a_tls_url_keeps_tls() {
+        let server = nats_server::run_basic_server();
+        let (port, mut canary) = canary_offering_tls().await;
+        let canary_url = format!("nats://127.0.0.1:{port}");
+        let client = steered_to(ConnectOptions::new(), &canary_url)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client
+            .set_server_pool(vec!["tls://127.0.0.1:1"])
+            .await
+            .unwrap();
+        client.set_server_pool(vec![canary_url]).await.unwrap();
+
+        client.force_reconnect().await.unwrap();
+        let seen = seen_during(&mut canary, Duration::from_secs(2)).await;
+        assert!(
+            !seen.is_empty() && seen.iter().all(|seen| *seen == Seen::TlsHandshake),
+            "{seen:?}"
+        );
+    }
+
+    // With tls_optional() a tls:// URL in the pool asks for nothing: the nats:// URL next to
+    // it gets CONNECT in plaintext.
+    #[tokio::test]
+    async fn set_server_pool_under_tls_optional_leaves_tls_to_each_url() {
+        let server = nats_server::run_basic_server();
+        let (port, mut canary) = canary_offering_tls().await;
+        let canary_url = format!("nats://127.0.0.1:{port}");
+        let client = steered_to(ConnectOptions::new().tls_optional(), &canary_url)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        client
+            .set_server_pool(vec!["tls://127.0.0.1:1".to_string(), canary_url])
+            .await
+            .unwrap();
+
+        client.force_reconnect().await.unwrap();
+        let seen = seen_during(&mut canary, Duration::from_secs(2)).await;
+        assert!(
+            !seen.is_empty() && seen.iter().all(|seen| *seen == Seen::PlaintextConnect),
+            "{seen:?}"
+        );
+    }
+
+    // A refused pool changes nothing. The wss:// URL would ask for TLS, so the ws:// URL next
+    // to it fails the call, which names that URL of the pool, without its user info, as what
+    // asked; the client still does not ask for TLS, and the nats:// URL of a later pool gets
+    // CONNECT in plaintext.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn set_server_pool_refused_for_a_ws_url_leaves_tls_as_it_was() {
+        let server = nats_server::run_basic_server();
+        let (port, mut canary) = canary_offering_tls().await;
+        let canary_url = format!("nats://127.0.0.1:{port}");
+        let client = steered_to(ConnectOptions::new(), &canary_url)
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let before = pool_urls(&client).await;
+
+        let err = client
+            .set_server_pool(vec!["wss://derek:porkchop@127.0.0.1:1", "ws://127.0.0.1:2"])
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), SetServerPoolErrorKind::Configuration);
+        let message = err.to_string();
+        assert!(
+            message.contains(
+                r#"the URL "wss://127.0.0.1:1/" given to set_server_pool() asks for TLS, but "ws://127.0.0.1:2/" is a ws:// URL; wss:// is the TLS form"#
+            ) && !message.contains("porkchop"),
+            "{message}"
+        );
+        assert_eq!(pool_urls(&client).await, before);
+
+        client.set_server_pool(vec![canary_url]).await.unwrap();
+        client.force_reconnect().await.unwrap();
+        let seen = seen_during(&mut canary, Duration::from_secs(2)).await;
+        assert!(
+            !seen.is_empty() && seen.iter().all(|seen| *seen == Seen::PlaintextConnect),
+            "{seen:?}"
         );
     }
 
