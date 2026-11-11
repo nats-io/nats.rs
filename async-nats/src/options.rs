@@ -52,6 +52,8 @@ pub struct ConnectOptions {
     pub(crate) tls_required: bool,
     pub(crate) tls_first: bool,
     pub(crate) tls_optional: bool,
+    pub(crate) tls_server_name: Option<String>,
+    pub(crate) verify_discovered_servers_by_ip: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
@@ -87,6 +89,11 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"tls_client_config", &"XXXXXXXX")
             .entry(&"tls_first", &self.tls_first)
             .entry(&"tls_optional", &self.tls_optional)
+            .entry(&"tls_server_name", &self.tls_server_name)
+            .entry(
+                &"verify_discovered_servers_by_ip",
+                &self.verify_discovered_servers_by_ip,
+            )
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
@@ -107,6 +114,8 @@ impl Default for ConnectOptions {
             tls_required: false,
             tls_first: false,
             tls_optional: false,
+            tls_server_name: None,
+            verify_discovered_servers_by_ip: false,
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
@@ -576,7 +585,8 @@ impl ConnectOptions {
     /// Requires TLS for every server when `true`. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
     ///
     /// A `tls://` or `wss://` server URL, root certificates, a client certificate, a TLS client
-    /// config and [`ConnectOptions::tls_first`] ask for TLS too. TLS then applies to every
+    /// config, [`ConnectOptions::tls_first`], [`ConnectOptions::tls_server_name`] and
+    /// [`ConnectOptions::verify_discovered_servers_by_ip`] ask for TLS too. TLS then applies to every
     /// server in the list, servers discovered from the cluster and reconnects included, and
     /// nothing the server sends turns it off.
     ///
@@ -609,10 +619,11 @@ impl ConnectOptions {
     }
 
     /// Leaves TLS to each server: the client does not ask for TLS, so root certificates, a
-    /// client certificate, a TLS client config or a `tls://` or `wss://` URL in the list no
-    /// longer make the other servers TLS. Each server is connected to as its own URL says, or
-    /// with TLS when its INFO requires it; a `tls://` or `wss://` URL still gets TLS, and so
-    /// does a server discovered on a connection with TLS.
+    /// client certificate, a TLS client config, [`ConnectOptions::tls_server_name`],
+    /// [`ConnectOptions::verify_discovered_servers_by_ip`] or a `tls://` or `wss://` URL in
+    /// the list no longer make the other servers TLS. Each server is connected to as its own
+    /// URL says, or with TLS when its INFO requires it; a `tls://` or `wss://` URL still gets
+    /// TLS, and so does a server discovered on a connection with TLS.
     ///
     /// Cannot be set together with `require_tls(true)` or [`ConnectOptions::tls_first`].
     ///
@@ -630,6 +641,62 @@ impl ConnectOptions {
     /// ```
     pub fn tls_optional(mut self) -> ConnectOptions {
         self.tls_optional = true;
+        self
+    }
+
+    /// Sets the name the certificate of every server is verified against, and, unless it is
+    /// an IP address, that is sent as SNI: the configured servers and the servers discovered
+    /// from the cluster alike.
+    ///
+    /// It is the first remedy when a certificate is not valid for the name the client
+    /// verifies it against, for example for a server given by its IP address, and keeps
+    /// verification on.
+    ///
+    /// It overrides the name a discovered server inherits from the server it was learned
+    /// from, and [`ConnectOptions::verify_discovered_servers_by_ip`]. Asks for TLS: every
+    /// server is then connected to with TLS, as with [`ConnectOptions::require_tls`].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .tls_server_name("nats.example.com")
+    ///     .connect("tls://10.0.0.1:4222")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_server_name<T: ToString>(mut self, name: T) -> ConnectOptions {
+        self.tls_server_name = Some(name.to_string());
+        self
+    }
+
+    /// Verifies a discovered server given as an IP address against that address instead of
+    /// the host name it was learned under, and sends it no SNI. It also lets the client
+    /// connect to a discovered IP address that has no name to be verified against, such as
+    /// one learned from a server given by its IP address.
+    ///
+    /// It is meant for clusters whose node certificates carry only IP addresses, and is safe
+    /// only where the CA that issued those certificates is not shared with others: any
+    /// certificate that CA issued for the address is accepted. It has no effect while
+    /// [`ConnectOptions::tls_server_name`] is set. Asks for TLS, as with
+    /// [`ConnectOptions::require_tls`].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .add_root_certificates("cluster-ca.pem".into())
+    ///     .verify_discovered_servers_by_ip()
+    ///     .connect("tls://10.0.0.1:4222")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn verify_discovered_servers_by_ip(mut self) -> ConnectOptions {
+        self.verify_discovered_servers_by_ip = true;
         self
     }
 
