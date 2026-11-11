@@ -938,4 +938,38 @@ mod discovered_servers {
             )
         );
     }
+
+    // Over a websocket with TLS too, a discovered IP address is verified against the name
+    // the server that reported it was verified under. The certificate names localhost,
+    // not 127.0.0.1.
+    #[cfg(feature = "websockets")]
+    #[tokio::test]
+    async fn discovered_ip_is_verified_against_the_name_of_its_reporter_over_wss() {
+        let ws_ports = [free_port(), free_port(), free_port()];
+        let configs = ws_ports.map(|port| {
+            config(&format!(
+                "websocket {{ host: 127.0.0.1, port: {port}, tls {{ \
+                 cert_file: \"{{certs}}/server-cert.pem\", \
+                 key_file: \"{{certs}}/server-key.pem\" }} }}"
+            ))
+        });
+        let _cluster = nats_server::run_cluster([
+            configs[0].as_str(),
+            configs[1].as_str(),
+            configs[2].as_str(),
+        ]);
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca())
+            .connect(format!("wss://localhost:{}", ws_ports[0]))
+            .await
+            .unwrap();
+        wait_for_server(&client, ws_ports[1]).await;
+
+        steer.to(ws_ports[1]);
+        client.force_reconnect().await.unwrap();
+        reconnected_to(&client, "node2").await;
+        client.flush().await.unwrap();
+    }
 }

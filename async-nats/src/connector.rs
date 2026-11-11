@@ -919,16 +919,20 @@ impl Connector {
     }
 
     /// Runs the TLS handshake with `server_addr` on `stream` and verifies the server
-    /// certificate against `tls_name`.
+    /// certificate against `tls_name`, which `Connector::tls_name` gives for TCP and
+    /// websocket alike. Without a name there is no handshake.
     async fn tls_handshake<S>(
         &self,
         stream: S,
         server_addr: &ServerAddr,
-        tls_name: &str,
+        tls_name: Option<&str>,
     ) -> Result<tokio_rustls::client::TlsStream<S>, ConnectError>
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        let tls_name = tls_name.ok_or_else(|| {
+            ConnectError::with_source(crate::ConnectErrorKind::Tls, no_tls_name(server_addr))
+        })?;
         tracing::debug!("upgrading connection to TLS");
         let tls_config = Arc::new(
             tls::config_tls(&self.options)
@@ -1060,6 +1064,10 @@ impl Connector {
         };
         tcp_stream.set_nodelay(true)?;
 
+        // A discovered server without a name is not connected to over TLS. It is skipped
+        // when it is known to need TLS; it fails here when its INFO asks for TLS.
+        let tls_name = self.tls_name(&server_addr);
+
         // Whether this connection has TLS: the servers it reports are learned over TLS.
         let mut tls = self.options.tls_first && !server_addr.is_websocket();
         let mut connection = match server_addr.scheme() {
@@ -1073,7 +1081,7 @@ impl Connector {
                 tls = server_addr.scheme() == "wss" || tls_required || self.tls_asked_by.is_some();
                 let stream: Box<dyn AsyncReadWrite> = if tls {
                     Box::new(
-                        self.tls_handshake(tcp_stream, &server_addr, server_addr.host())
+                        self.tls_handshake(tcp_stream, &server_addr, tls_name)
                             .await?,
                     )
                 } else {
@@ -1098,14 +1106,7 @@ impl Connector {
             ),
         };
 
-        // A discovered server without a name is not connected to over TLS. It is skipped
-        // when it is known to need TLS; it fails here when its INFO asks for TLS.
-        let tls_name = self.tls_name(&server_addr);
-
         let tls_connection = |connection: Connection| async {
-            let tls_name = tls_name.ok_or_else(|| {
-                ConnectError::with_source(crate::ConnectErrorKind::Tls, no_tls_name(&server_addr))
-            })?;
             let tls_stream = self
                 .tls_handshake(connection.stream, &server_addr, tls_name)
                 .await?;
