@@ -1060,6 +1060,8 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             tls_client_config: options.tls_client_config,
             tls_first: options.tls_first,
             tls_optional: options.tls_optional,
+            tls_server_name: options.tls_server_name,
+            verify_discovered_servers_by_ip: options.verify_discovered_servers_by_ip,
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,

@@ -151,6 +151,8 @@ pub(crate) struct ConnectorOptions {
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) tls_first: bool,
     pub(crate) tls_optional: bool,
+    pub(crate) tls_server_name: Option<String>,
+    pub(crate) verify_discovered_servers_by_ip: bool,
     pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
@@ -245,6 +247,10 @@ fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<Cow<'s
         Some("add_client_certificate()".into())
     } else if options.tls_client_config.is_some() {
         Some("tls_client_config()".into())
+    } else if options.tls_server_name.is_some() {
+        Some("tls_server_name()".into())
+    } else if options.verify_discovered_servers_by_ip {
+        Some("verify_discovered_servers_by_ip()".into())
     } else {
         None
     }
@@ -313,10 +319,18 @@ fn discovered_addr(entry: &str, websocket: bool) -> Result<ServerAddr, &'static 
     }
 }
 
-/// Says that the discovered server `addr` has no name to verify its certificate against.
+/// Says that the discovered server `addr` has no name to verify its certificate against,
+/// and which settings give it one.
 fn no_tls_name(addr: &ServerAddr) -> String {
+    let remedy = if addr.host().parse::<IpAddr>().is_ok() {
+        "tls_server_name() sets the name to verify every server against, or \
+         verify_discovered_servers_by_ip() verifies a discovered IP address against itself, \
+         which is safe only where the CA that issued the certificates is not shared with others"
+    } else {
+        "tls_server_name() sets the name to verify every server against"
+    };
     format!(
-        "{:?}: a discovered server with no name to verify its certificate against",
+        "{:?}: a discovered server with no name to verify its certificate against; {remedy}",
         without_user_info(addr)
     )
 }
@@ -527,15 +541,22 @@ impl Connector {
     /// The name the certificate of `addr` is verified against, and sent as SNI unless it
     /// is an IP address, or `None` when there is no such name.
     ///
-    /// A configured server is verified as configured, against the host of its URL. A
-    /// discovered IP address is verified against the host name it was learned under. A
-    /// discovered host name is verified against itself when it was learned over TLS, and
-    /// has no name otherwise: a name learned without TLS is not trusted.
+    /// The user's `tls_server_name` comes first, for every server. Without it, a configured
+    /// server is verified as configured, against the host of its URL. A discovered IP
+    /// address is verified against itself under `verify_discovered_servers_by_ip`, and
+    /// else against the host name it was learned under. A discovered host name is verified
+    /// against itself when it was learned over TLS, and has no name otherwise: a name
+    /// learned without TLS is not trusted.
     fn tls_name<'a>(&'a self, addr: &'a ServerAddr) -> Option<&'a str> {
+        if let Some(name) = &self.options.tls_server_name {
+            return Some(name);
+        }
         let host = addr.host();
+        let ip = host.parse::<IpAddr>().is_ok();
         match self.discovered.get(&server_key(addr)) {
             None => Some(host),
-            Some(discovered) if host.parse::<IpAddr>().is_ok() => discovered.name.as_deref(),
+            Some(_) if ip && self.options.verify_discovered_servers_by_ip => Some(host),
+            Some(discovered) if ip => discovered.name.as_deref(),
             Some(discovered) => discovered.tls.then_some(host),
         }
     }
@@ -880,8 +901,20 @@ impl Connector {
         );
         let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
 
-        let domain = crate::rustls::pki_types::ServerName::try_from(tls_name)
-            .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
+        let domain = crate::rustls::pki_types::ServerName::try_from(tls_name).map_err(|err| {
+            // tls_server_name() overrides every name, so the value is the user's.
+            if self.options.tls_server_name.is_some() {
+                ConnectError::with_source(
+                    crate::ConnectErrorKind::Tls,
+                    format!(
+                        "tls_server_name() is set to {tls_name:?}, which is neither a \
+                         host name nor an IP address"
+                    ),
+                )
+            } else {
+                ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
+            }
+        })?;
 
         Ok(tls_connector.connect(domain.to_owned(), stream).await?)
     }
@@ -1169,6 +1202,8 @@ mod tests {
             tls_client_config: None,
             tls_first: false,
             tls_optional: false,
+            tls_server_name: None,
+            verify_discovered_servers_by_ip: false,
             auth: Auth::default(),
             no_echo: false,
             connection_timeout: Duration::from_secs(5),
@@ -1236,6 +1271,20 @@ mod tests {
                     ..options()
                 },
             ),
+            (
+                "tls_server_name()",
+                ConnectorOptions {
+                    tls_server_name: Some("nats.example.com".into()),
+                    ..options()
+                },
+            ),
+            (
+                "verify_discovered_servers_by_ip()",
+                ConnectorOptions {
+                    verify_discovered_servers_by_ip: true,
+                    ..options()
+                },
+            ),
         ] {
             assert_eq!(tls_asked_by(&options, &plain).as_deref(), Some(expected));
         }
@@ -1271,6 +1320,8 @@ mod tests {
             certificates: vec![PathBuf::from("ca.pem")],
             client_cert: Some(PathBuf::from("cert.pem")),
             client_key: Some(PathBuf::from("key.pem")),
+            tls_server_name: Some("nats.example.com".into()),
+            verify_discovered_servers_by_ip: true,
             ..options()
         };
         let mixed = servers(&["nats://localhost:4222", "tls://localhost:4223"]);
@@ -1777,6 +1828,89 @@ mod tests {
         assert!(connector.skip_without_tls_name(&addr("nats://10.0.0.2:4222")));
         assert!(!connector.skip_without_tls_name(&addr("nats://node3.example.com:4222")));
         assert!(connector.discovered[&("10.0.0.2".to_string(), 4222)].no_name_logged);
+    }
+
+    /// A connector configured with `seed` that learned, over TLS from `seed`, an IP address
+    /// and a host name, and without TLS from `seed` another host name.
+    fn connector_with_discovered_servers(seed: &str, options: ConnectorOptions) -> Connector {
+        let mut connector = connector(&[seed], options);
+        let seed = addr(seed);
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into(), "node3.example.com:4222".into()],
+            &seed,
+            true,
+        );
+        connector.add_discovered_servers(&["node4.example.com:4222".into()], &seed, false);
+        connector
+    }
+
+    #[test]
+    fn tls_server_name_overrides_every_name() {
+        for seed in ["tls://nats.example.com:4222", "tls://10.0.0.1:4222"] {
+            let connector = connector_with_discovered_servers(
+                seed,
+                ConnectorOptions {
+                    tls_server_name: Some("cluster.example.com".into()),
+                    verify_discovered_servers_by_ip: true,
+                    ..options()
+                },
+            );
+            for url in [
+                seed,
+                "nats://10.0.0.2:4222",
+                "nats://node3.example.com:4222",
+                "nats://node4.example.com:4222",
+            ] {
+                assert_eq!(
+                    tls_name(&connector, url).as_deref(),
+                    Some("cluster.example.com"),
+                    "{url}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn verify_discovered_servers_by_ip_verifies_a_discovered_ip_against_itself() {
+        for seed in ["tls://nats.example.com:4222", "tls://10.0.0.1:4222"] {
+            let mut connector = connector_with_discovered_servers(
+                seed,
+                ConnectorOptions {
+                    verify_discovered_servers_by_ip: true,
+                    ..options()
+                },
+            );
+            let seed_host = addr(seed).host().to_owned();
+            // Only discovered IP addresses: a configured server stays as configured, and a
+            // host name keeps its own rule.
+            for (url, name) in [
+                (seed, Some(seed_host.as_str())),
+                ("nats://10.0.0.2:4222", Some("10.0.0.2")),
+                ("nats://node3.example.com:4222", Some("node3.example.com")),
+                ("nats://node4.example.com:4222", None),
+            ] {
+                assert_eq!(tls_name(&connector, url).as_deref(), name, "{url}");
+            }
+            assert!(!connector.skip_without_tls_name(&addr("nats://10.0.0.2:4222")));
+        }
+    }
+
+    #[test]
+    fn the_error_without_a_name_names_the_settings_that_give_one() {
+        assert_eq!(
+            no_tls_name(&addr("nats://10.0.0.2:4222")),
+            "\"nats://10.0.0.2:4222\": a discovered server with no name to verify its certificate \
+             against; tls_server_name() sets the name to verify every server against, or \
+             verify_discovered_servers_by_ip() verifies a discovered IP address against \
+             itself, which is safe only where the CA that issued the certificates is not \
+             shared with others"
+        );
+        assert_eq!(
+            no_tls_name(&addr("nats://node4.example.com:4222")),
+            "\"nats://node4.example.com:4222\": a discovered server with no name to verify its \
+             certificate against; tls_server_name() sets the name to verify every server \
+             against"
+        );
     }
 
     #[test]

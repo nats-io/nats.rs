@@ -784,4 +784,89 @@ mod discovered_servers {
         let error = last_error(&client, second.port).await;
         assert!(error.contains("UnknownIssuer"), "{error}");
     }
+
+    // tls_server_name() sets the name every server is verified against and that is sent as
+    // SNI, the configured server given by its IP address and the servers it reports alike.
+    // The certificate names localhost, not 127.0.0.1.
+    #[tokio::test]
+    async fn tls_server_name_is_verified_and_sent_for_every_server() {
+        let mut second = FakeServer::tls(json!({})).await;
+        let mut seed =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca().tls_server_name("localhost"))
+            .connect(format!("tls://127.0.0.1:{}", seed.port))
+            .await
+            .unwrap();
+        assert_eq!(seed.next_connect().await.unwrap()["sni"], "localhost");
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(second.next_connect().await.unwrap()["sni"], "localhost");
+    }
+
+    // One trailing dot is stripped from the name, for SNI and for the check.
+    #[tokio::test]
+    async fn one_trailing_dot_is_stripped_from_the_name() {
+        let mut server = FakeServer::tls(json!({})).await;
+
+        test_ca()
+            .tls_server_name("localhost.")
+            .connect(format!("tls://127.0.0.1:{}", server.port))
+            .await
+            .unwrap();
+
+        assert_eq!(server.next_connect().await.unwrap()["sni"], "localhost");
+    }
+
+    // A tls_server_name() that is neither a host name nor an IP address fails the attempt
+    // with an error that names the setting and the value.
+    #[tokio::test]
+    async fn names_the_tls_server_name_that_is_neither_a_host_name_nor_an_ip_address() {
+        let server = FakeServer::tls(json!({})).await;
+
+        let error = test_ca()
+            .tls_server_name("localhost:4222")
+            .connect(format!("tls://127.0.0.1:{}", server.port))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), async_nats::ConnectErrorKind::Tls);
+        assert_eq!(
+            error.to_string(),
+            r#"TLS error: tls_server_name() is set to "localhost:4222", which is neither a host name nor an IP address"#
+        );
+    }
+
+    // verify_discovered_servers_by_ip() lets the client connect to a discovered IP address
+    // that has no name to be verified against: it is verified against itself, with no
+    // SNI. The certificate names 127.0.0.1.
+    #[tokio::test]
+    async fn verify_discovered_servers_by_ip_connects_to_a_discovered_ip_without_a_name() {
+        let mut second = FakeServer::tls_with(json!({}), "ip-cert.pem", "ip-key.pem").await;
+        let seed = FakeServer::tls_with(
+            json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }),
+            "ip-cert.pem",
+            "ip-key.pem",
+        )
+        .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(
+                ConnectOptions::new()
+                    .add_root_certificates(certs("ip-ca.pem"))
+                    .verify_discovered_servers_by_ip(),
+            )
+            .connect(format!("tls://127.0.0.1:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(second.next_connect().await.unwrap()["sni"], Value::Null);
+    }
 }
