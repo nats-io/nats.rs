@@ -309,10 +309,12 @@ mod discovered_servers {
         (port, rx)
     }
 
-    /// Waits until the client's server pool holds a server with `port`.
+    /// Waits until the client's server pool holds a server with `port`. The client takes
+    /// the servers a cluster reports only from the INFO of a connect, so while the cluster
+    /// is still forming, a reconnect is forced to read the list again.
     #[cfg(feature = "websockets")]
     async fn wait_for_server(client: &async_nats::Client, port: u16) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let pool = client.server_pool().await.unwrap();
             if pool.iter().any(|server| server.addr.port() == port) {
@@ -322,7 +324,8 @@ mod discovered_servers {
                 tokio::time::Instant::now() < deadline,
                 "no server with port {port} in {pool:?}"
             );
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            client.force_reconnect().await.unwrap();
         }
     }
 
