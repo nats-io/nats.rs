@@ -350,6 +350,14 @@ impl Connector {
                             error,
                         ))
                     }
+                    // A TLS error's text names the setting that asked for TLS. Other errors keep
+                    // only their kind: their text can quote a line from the server, which is not
+                    // escaped.
+                    ConnectErrorKind::Tls => {
+                        self.events_tx
+                            .try_send(Event::ClientError(ClientError::Other(error.to_string())))
+                            .ok();
+                    }
                     other => {
                         self.events_tx
                             .try_send(Event::ClientError(ClientError::Other(other.to_string())))

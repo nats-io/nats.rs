@@ -714,4 +714,42 @@ mod tls_options {
             )
         );
     }
+
+    // A TLS error of a failed attempt that the client retries reports its text in the
+    // event, not only its kind. The event carries the error of the last server tried in a
+    // pass, so for this one-server list, under retry_on_initial_connect() and on reconnect
+    // alike, it names the setting that asked for TLS and the way out.
+    #[tokio::test]
+    async fn failed_attempt_event_names_the_setting_and_the_way_out() {
+        let (port, _canary) = canary().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _client = ConnectOptions::new()
+            .add_root_certificates(certs("rootCA.pem"))
+            .retry_on_initial_connect()
+            .reconnect_delay_callback(|_| Duration::from_millis(50))
+            .event_callback(move |event| {
+                let tx = tx.clone();
+                async move {
+                    if let async_nats::Event::ClientError(error) = event {
+                        tx.send(error.to_string()).ok();
+                    }
+                }
+            })
+            .connect(format!("nats://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+
+        let text = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            text,
+            format!(
+                "nats: TLS error: add_root_certificates() asks for TLS, but \
+                 \"nats://127.0.0.1:{port}\" does not offer it; tls_optional() leaves TLS to \
+                 each server"
+            )
+        );
+    }
 }
