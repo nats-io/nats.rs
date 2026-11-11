@@ -289,7 +289,7 @@ fn refused_url<'a>(
     ))
 }
 
-/// The address of a `connect_urls` entry learned on a websocket connection, or on a TCP
+/// The address of a `connect_urls` entry learned on a WebSocket connection, or on a TCP
 /// connection, or why the entry is skipped. The address has the scheme of that transport,
 /// `ws` or `nats`; whether it gets TLS is not the scheme's to say.
 ///
@@ -920,7 +920,7 @@ impl Connector {
 
     /// Runs the TLS handshake with `server_addr` on `stream` and verifies the server
     /// certificate against `tls_name`, which `Connector::tls_name` gives for TCP and
-    /// websocket alike. Without a name there is no handshake.
+    /// WebSocket alike. Without a name there is no handshake.
     async fn tls_handshake<S>(
         &self,
         stream: S,
