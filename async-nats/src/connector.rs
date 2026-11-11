@@ -335,6 +335,41 @@ fn no_tls_name(addr: &ServerAddr) -> String {
     )
 }
 
+/// A name a certificate presents, as rustls reports it (`DnsName("nats.example.com")`,
+/// `IpAddress(10.0.0.1)`), without the wrapper, and an IP address in its usual form.
+fn presented_name(name: &str) -> String {
+    if let Some(dns) = name
+        .strip_prefix("DnsName(\"")
+        .and_then(|name| name.strip_suffix("\")"))
+    {
+        return dns.to_owned();
+    }
+    name.strip_prefix("IpAddress(")
+        .and_then(|name| name.strip_suffix(')'))
+        .and_then(|ip| ip.parse::<IpAddr>().ok())
+        .map_or_else(|| name.to_owned(), |ip| ip.to_string())
+}
+
+/// A failed name check as an attempt reports it: the client's message, with the
+/// `io::Error` that carries the error rustls reported as its source.
+#[derive(Debug)]
+struct NameCheckFailed {
+    message: String,
+    source: std::io::Error,
+}
+
+impl fmt::Display for NameCheckFailed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for NameCheckFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 /// A `connect_urls` entry as a log line quotes it: cut at 256 bytes and escaped, since the
 /// server chose it.
 fn quoted(entry: &str) -> String {
@@ -883,11 +918,12 @@ impl Connector {
         }))
     }
 
-    /// Runs the TLS handshake on `stream` and verifies the server certificate against
-    /// `tls_name`.
+    /// Runs the TLS handshake with `server_addr` on `stream` and verifies the server
+    /// certificate against `tls_name`.
     async fn tls_handshake<S>(
         &self,
         stream: S,
+        server_addr: &ServerAddr,
         tls_name: &str,
     ) -> Result<tokio_rustls::client::TlsStream<S>, ConnectError>
     where
@@ -916,7 +952,86 @@ impl Connector {
             }
         })?;
 
-        Ok(tls_connector.connect(domain.to_owned(), stream).await?)
+        tls_connector
+            .connect(domain.to_owned(), stream)
+            .await
+            .map_err(|err| {
+                use rustls::CertificateError::{NotValidForName, NotValidForNameContext};
+                let presented = match err.get_ref().and_then(|err| err.downcast_ref()) {
+                    Some(rustls::Error::InvalidCertificate(NotValidForNameContext {
+                        presented,
+                        ..
+                    })) => Some(presented.as_slice()),
+                    Some(rustls::Error::InvalidCertificate(NotValidForName)) => None,
+                    _ => return err.into(),
+                };
+                ConnectError::with_source(
+                    crate::ConnectErrorKind::Tls,
+                    NameCheckFailed {
+                        message: self.name_check_failed(server_addr, tls_name, presented),
+                        source: err,
+                    },
+                )
+            })
+    }
+
+    /// The error for a certificate of `addr` that is not valid for `tls_name`: the name
+    /// the client expected, the names the certificate presents where rustls reports them
+    /// (at most four), and the settings that change the name. A discovered server also
+    /// gets the remedy on the server's side. It never suggests turning verification off.
+    fn name_check_failed(
+        &self,
+        addr: &ServerAddr,
+        tls_name: &str,
+        presented: Option<&[String]>,
+    ) -> String {
+        const SHOWN: usize = 4;
+        let mut message = format!(
+            "the certificate of {:?} is not valid for {tls_name:?}",
+            without_user_info(addr)
+        );
+        let names: Vec<String> = presented
+            .unwrap_or_default()
+            .iter()
+            .map(|name| presented_name(name))
+            .collect();
+        match (presented, names.len()) {
+            (None, _) => {}
+            (Some(_), 0) => message.push_str(": it is issued for no name"),
+            (Some(_), count) => {
+                let shown: Vec<String> = names
+                    .iter()
+                    .take(SHOWN)
+                    .map(|name| format!("{name:?}"))
+                    .collect();
+                message.push_str(&format!(": it is issued for {}", shown.join(", ")));
+                if count > SHOWN {
+                    message.push_str(&format!(" and {} more", count - SHOWN));
+                }
+            }
+        }
+        message.push_str("; tls_server_name() sets the name every server is verified against");
+        if self.options.tls_server_name.is_some()
+            || !self.discovered.contains_key(&server_key(addr))
+        {
+            return message;
+        }
+        message.push_str(
+            ", or each server of the cluster can advertise a name its certificate is issued \
+             for (client_advertise in nats-server)",
+        );
+        let ip = addr.host().parse::<IpAddr>().ok();
+        if ip.is_some()
+            && names.iter().any(|name| name.parse::<IpAddr>().ok() == ip)
+            && !self.options.verify_discovered_servers_by_ip
+        {
+            message.push_str(
+                ", or verify_discovered_servers_by_ip() verifies a discovered IP address \
+                 against itself, which is safe only where the CA that issued the certificates \
+                 is not shared with others",
+            );
+        }
+        message
     }
 
     pub(crate) async fn try_connect_to(
@@ -957,7 +1072,10 @@ impl Connector {
             "ws" | "wss" => {
                 tls = server_addr.scheme() == "wss" || tls_required || self.tls_asked_by.is_some();
                 let stream: Box<dyn AsyncReadWrite> = if tls {
-                    Box::new(self.tls_handshake(tcp_stream, server_addr.host()).await?)
+                    Box::new(
+                        self.tls_handshake(tcp_stream, &server_addr, server_addr.host())
+                            .await?,
+                    )
                 } else {
                     Box::new(tcp_stream)
                 };
@@ -988,7 +1106,9 @@ impl Connector {
             let tls_name = tls_name.ok_or_else(|| {
                 ConnectError::with_source(crate::ConnectErrorKind::Tls, no_tls_name(&server_addr))
             })?;
-            let tls_stream = self.tls_handshake(connection.stream, tls_name).await?;
+            let tls_stream = self
+                .tls_handshake(connection.stream, &server_addr, tls_name)
+                .await?;
 
             Ok::<Connection, ConnectError>(Connection::new(
                 Box::new(tls_stream),
@@ -1911,6 +2031,129 @@ mod tests {
              certificate against; tls_server_name() sets the name to verify every server \
              against"
         );
+    }
+
+    #[test]
+    fn a_failed_name_check_names_the_expected_and_presented_names() {
+        const NAME_SETTING: &str =
+            "tls_server_name() sets the name every server is verified against";
+        const CLIENT_ADVERTISE: &str = ", or each server of the cluster can advertise a name \
+                                        its certificate is issued for (client_advertise in \
+                                        nats-server)";
+        const FLAG: &str = ", or verify_discovered_servers_by_ip() verifies a discovered IP \
+                            address against itself, which is safe only where the CA that \
+                            issued the certificates is not shared with others";
+        let presented = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let connector = connector_with_discovered_servers("tls://nats.example.com:4222", options());
+        let flag = connector_with_discovered_servers(
+            "tls://nats.example.com:4222",
+            ConnectorOptions {
+                verify_discovered_servers_by_ip: true,
+                ..options()
+            },
+        );
+        let named = connector_with_discovered_servers(
+            "tls://nats.example.com:4222",
+            ConnectorOptions {
+                tls_server_name: Some("cluster.example.com".into()),
+                ..options()
+            },
+        );
+
+        for (connector, url, name, names, expected) in [
+            // A configured server: the name setting only.
+            (
+                &connector,
+                "tls://derek:porkchop@nats.example.com:4222",
+                "nats.example.com",
+                Some(presented(&[r#"DnsName("other.example.com")"#])),
+                format!(
+                    r#"the certificate of "tls://nats.example.com:4222" is not valid for "nats.example.com": it is issued for "other.example.com"; {NAME_SETTING}"#
+                ),
+            ),
+            // A discovered server: also the remedy on the server's side.
+            (
+                &connector,
+                "nats://node3.example.com:4222",
+                "node3.example.com",
+                Some(presented(&[r#"DnsName("nats.example.com")"#])),
+                format!(
+                    r#"the certificate of "nats://node3.example.com:4222" is not valid for "node3.example.com": it is issued for "nats.example.com"; {NAME_SETTING}{CLIENT_ADVERTISE}"#
+                ),
+            ),
+            // A discovered IP address whose certificate names IP addresses: also the flag.
+            // At most four names are shown.
+            (
+                &connector,
+                "nats://10.0.0.2:4222",
+                "nats.example.com",
+                Some(presented(&[
+                    "IpAddress(10.0.0.2)",
+                    "IpAddress(10.0.0.3)",
+                    "IpAddress(10.0.0.4)",
+                    "IpAddress(10.0.0.5)",
+                    "IpAddress(10.0.0.6)",
+                    "IpAddress(10.0.0.7)",
+                ])),
+                format!(
+                    r#"the certificate of "nats://10.0.0.2:4222" is not valid for "nats.example.com": it is issued for "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5" and 2 more; {NAME_SETTING}{CLIENT_ADVERTISE}{FLAG}"#
+                ),
+            ),
+            // Not when the certificate does not name the server's own address.
+            (
+                &connector,
+                "nats://10.0.0.2:4222",
+                "nats.example.com",
+                Some(presented(&["IpAddress(10.0.0.9)"])),
+                format!(
+                    r#"the certificate of "nats://10.0.0.2:4222" is not valid for "nats.example.com": it is issued for "10.0.0.9"; {NAME_SETTING}{CLIENT_ADVERTISE}"#
+                ),
+            ),
+            // Not when the flag is set already.
+            (
+                &flag,
+                "nats://10.0.0.2:4222",
+                "10.0.0.2",
+                Some(presented(&["IpAddress(10.0.0.9)"])),
+                format!(
+                    r#"the certificate of "nats://10.0.0.2:4222" is not valid for "10.0.0.2": it is issued for "10.0.0.9"; {NAME_SETTING}{CLIENT_ADVERTISE}"#
+                ),
+            ),
+            // Nor the remedy on the server's side while tls_server_name() is set.
+            (
+                &named,
+                "nats://10.0.0.2:4222",
+                "cluster.example.com",
+                Some(presented(&[r#"DnsName("node2.example.com")"#])),
+                format!(
+                    r#"the certificate of "nats://10.0.0.2:4222" is not valid for "cluster.example.com": it is issued for "node2.example.com"; {NAME_SETTING}"#
+                ),
+            ),
+            // A certificate without names, and a check that does not report them.
+            (
+                &connector,
+                "tls://nats.example.com:4222",
+                "nats.example.com",
+                Some(Vec::new()),
+                format!(
+                    r#"the certificate of "tls://nats.example.com:4222" is not valid for "nats.example.com": it is issued for no name; {NAME_SETTING}"#
+                ),
+            ),
+            (
+                &connector,
+                "tls://nats.example.com:4222",
+                "nats.example.com",
+                None,
+                format!(
+                    r#"the certificate of "tls://nats.example.com:4222" is not valid for "nats.example.com"; {NAME_SETTING}"#
+                ),
+            ),
+        ] {
+            assert_eq!(
+                connector.name_check_failed(&addr(url), name, names.as_deref()),
+                expected
+            );
+        }
     }
 
     #[test]

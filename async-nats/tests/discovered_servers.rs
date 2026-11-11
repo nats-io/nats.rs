@@ -23,7 +23,7 @@ mod discovered_servers {
         time::Duration,
     };
 
-    use async_nats::{ConnectOptions, ReconnectToServer};
+    use async_nats::{ConnectErrorKind, ConnectOptions, ReconnectToServer};
     use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
     use serde_json::{json, Value};
     use tokio::{
@@ -868,5 +868,74 @@ mod discovered_servers {
         steer.to(second.port);
         client.force_reconnect().await.unwrap();
         assert_eq!(second.next_connect().await.unwrap()["sni"], Value::Null);
+    }
+
+    // A failed name check says which name the client expected, which names the certificate
+    // is issued for, and which setting changes the name. The error rustls reported stays
+    // reachable through the source of the error.
+    #[tokio::test]
+    async fn a_failed_name_check_names_the_expected_and_presented_names() {
+        let server = FakeServer::tls(json!({})).await;
+
+        let err = test_ca()
+            .connect(format!("tls://127.0.0.1:{}", server.port))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ConnectErrorKind::Tls);
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "TLS error: the certificate of \"tls://127.0.0.1:{}\" is not valid for \
+                 \"127.0.0.1\": it is issued for \"localhost\", \"::1\"; tls_server_name() \
+                 sets the name every server is verified against",
+                server.port
+            )
+        );
+        let mut causes = std::iter::successors(std::error::Error::source(&err), |err| err.source());
+        let rustls_error = causes.find_map(|err| {
+            err.downcast_ref::<std::io::Error>()?
+                .get_ref()?
+                .downcast_ref::<async_nats::rustls::Error>()
+        });
+        assert!(
+            matches!(
+                rustls_error,
+                Some(async_nats::rustls::Error::InvalidCertificate(_))
+            ),
+            "{rustls_error:?}"
+        );
+    }
+
+    // For a discovered server it also points at the remedy on the server's side.
+    #[tokio::test]
+    async fn a_failed_name_check_of_a_discovered_server_points_at_client_advertise() {
+        let second =
+            FakeServer::tls_with(json!({}), "wrong-name-cert.pem", "wrong-name-key.pem").await;
+        let seed =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca())
+            .connect(format!("tls://localhost:{}", seed.port))
+            .await
+            .unwrap();
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+
+        let error = last_error(&client, second.port).await;
+        assert_eq!(
+            error,
+            format!(
+                "TLS error: the certificate of \"nats://127.0.0.1:{}\" is not valid for \
+                 \"localhost\": it is issued for \"wrong.example\"; tls_server_name() sets \
+                 the name every server is verified against, or each server of the cluster \
+                 can advertise a name its certificate is issued for (client_advertise in \
+                 nats-server)",
+                second.port
+            )
+        );
     }
 }
