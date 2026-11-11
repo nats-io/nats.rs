@@ -170,13 +170,13 @@ jobs:
         # The binaries that exercise the TLS backend, named, so that a test is run by what
         # it covers and not by whether "tls" occurs in its name.
         run: |
-          cargo test --test tls_options --test tls_tests --test websocket_test --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
-      - name: Run the TLS option tests without websockets
+          cargo test --test tls_options --test tls_tests --test websocket_test --test discovered_servers --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
+      - name: Run the unit and TLS option tests without websockets
         if: matrix.tls_feature == 'ring'
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --test tls_options --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,ring -- --nocapture
+          cargo test --lib --test tls_options --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,ring -- --nocapture
 
   server_2_11_tests:
     defaults:
