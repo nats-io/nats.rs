@@ -611,7 +611,8 @@ impl ConnectOptions {
     /// Leaves TLS to each server: the client does not ask for TLS, so root certificates, a
     /// client certificate, a TLS client config or a `tls://` or `wss://` URL in the list no
     /// longer make the other servers TLS. Each server is connected to as its own URL says, or
-    /// with TLS when its INFO requires it; a `tls://` or `wss://` URL still gets TLS.
+    /// with TLS when its INFO requires it; a `tls://` or `wss://` URL still gets TLS, and so
+    /// does a server discovered on a connection with TLS.
     ///
     /// Cannot be set together with `require_tls(true)` or [`ConnectOptions::tls_first`].
     ///
