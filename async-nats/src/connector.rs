@@ -181,10 +181,6 @@ pub(crate) struct Connector {
     pub(crate) max_payload: Arc<AtomicUsize>,
     /// Last known server info, updated after each successful connection.
     last_info: ServerInfo,
-    /// TLS names to verify discovered IP servers against, keyed by address.
-    /// Holds the DNS name of the server through which the IP was discovered,
-    /// so that the certificate check is not downgraded to the bare IP.
-    tls_names: HashMap<ServerAddr, String>,
     /// What the client learned about each discovered server, keyed by host and port.
     discovered: HashMap<(String, u16), Discovered>,
     /// Servers of the pool that keep TLS because the client learned them over TLS before a
@@ -199,6 +195,14 @@ struct Discovered {
     /// It was reported on a connection with TLS, so it is connected to with TLS. Once
     /// set, it stays set.
     tls: bool,
+    /// The host name of the server that reported it, over any number of hops: the name
+    /// that server was verified under when the report came over TLS, else the name of the
+    /// configured server the client learned it through. A discovered IP address is one
+    /// more address for that name and is verified against it. `None` when that server was
+    /// reached by an IP address.
+    name: Option<String>,
+    /// Whether the client logged that it has no name to verify the server against.
+    no_name_logged: bool,
 }
 
 /// A server's host and port as written: two entries with the same key are one server.
@@ -309,6 +313,14 @@ fn discovered_addr(entry: &str, websocket: bool) -> Result<ServerAddr, &'static 
     }
 }
 
+/// Says that the discovered server `addr` has no name to verify its certificate against.
+fn no_tls_name(addr: &ServerAddr) -> String {
+    format!(
+        "{:?}: a discovered server with no name to verify its certificate against",
+        without_user_info(addr)
+    )
+}
+
 /// A `connect_urls` entry as a log line quotes it: cut at 256 bytes and escaped, since the
 /// server chose it.
 fn quoted(entry: &str) -> String {
@@ -369,7 +381,6 @@ impl Connector {
             max_payload,
             connect_stats,
             last_info: ServerInfo::default(),
-            tls_names: HashMap::new(),
             discovered: HashMap::new(),
             kept_tls: HashSet::new(),
         })
@@ -466,7 +477,6 @@ impl Connector {
                 })
                 .collect();
         }
-        self.tls_names.clear();
         self.discovered.clear();
         self.attempts = 0;
         Ok(())
@@ -514,6 +524,39 @@ impl Connector {
                 .is_some_and(|discovered| discovered.tls)
     }
 
+    /// The name the certificate of `addr` is verified against, and sent as SNI unless it
+    /// is an IP address, or `None` when there is no such name.
+    ///
+    /// A configured server is verified as configured, against the host of its URL. A
+    /// discovered IP address is verified against the host name it was learned under. A
+    /// discovered host name is verified against itself when it was learned over TLS, and
+    /// has no name otherwise: a name learned without TLS is not trusted.
+    fn tls_name<'a>(&'a self, addr: &'a ServerAddr) -> Option<&'a str> {
+        let host = addr.host();
+        match self.discovered.get(&server_key(addr)) {
+            None => Some(host),
+            Some(discovered) if host.parse::<IpAddr>().is_ok() => discovered.name.as_deref(),
+            Some(discovered) => discovered.tls.then_some(host),
+        }
+    }
+
+    /// Whether `addr` is skipped: it is connected to with TLS whatever its INFO says, and
+    /// has no name to verify its certificate against. Logged once per server.
+    fn skip_without_tls_name(&mut self, addr: &ServerAddr) -> bool {
+        if self.tls_name(addr).is_some()
+            || (self.tls_asked_by.is_none() && !self.learned_over_tls(addr))
+        {
+            return false;
+        }
+        if let Some(discovered) = self.discovered.get_mut(&server_key(addr)) {
+            if !discovered.no_name_logged {
+                discovered.no_name_logged = true;
+                tracing::warn!("skipping {}", no_tls_name(addr));
+            }
+        }
+        true
+    }
+
     /// Adds the servers in `connect_urls`, learned on a connection to `reporter` that has
     /// TLS when `tls` is set, to the pool as discovered servers.
     ///
@@ -522,13 +565,27 @@ impl Connector {
     /// connection with TLS, it gains TLS, and it never loses it. Two entries are one
     /// server when host and port match as written; an entry that is a configured server
     /// changes nothing about it.
+    ///
+    /// A discovered IP address is verified against the name `reporter` was verified under
+    /// when `tls` is set, or else against the name of the configured server the client
+    /// learned it through. The first report decides the name, unless a later one comes
+    /// over TLS and the server gains TLS: it then takes the name of that report.
     fn add_discovered_servers(
         &mut self,
         connect_urls: &[String],
         reporter: &ServerAddr,
         tls: bool,
-        tls_name: &str,
     ) {
+        let name = if tls {
+            self.tls_name(reporter)
+        } else {
+            match self.discovered.get(&server_key(reporter)) {
+                Some(discovered) => discovered.name.as_deref(),
+                None => Some(reporter.host()),
+            }
+        }
+        .filter(|name| name.parse::<IpAddr>().is_err())
+        .map(str::to_owned);
         for url in connect_urls {
             let discovered_addr = match discovered_addr(url, reporter.is_websocket()) {
                 Ok(addr) => addr,
@@ -539,19 +596,23 @@ impl Connector {
             };
             let key = server_key(&discovered_addr);
             if let Some(discovered) = self.discovered.get_mut(&key) {
-                discovered.tls |= tls;
+                if tls && !discovered.tls {
+                    discovered.tls = true;
+                    discovered.name = name.clone();
+                }
             } else if !self.servers.iter().any(|s| server_key(&s.addr) == key) {
                 tracing::debug!(
                     discovered_url = discovered_addr.as_url_str(),
                     "adding discovered server"
                 );
-                if discovered_addr.host().parse::<IpAddr>().is_ok()
-                    && tls_name.parse::<IpAddr>().is_err()
-                {
-                    self.tls_names
-                        .insert(discovered_addr.clone(), tls_name.to_owned());
-                }
-                self.discovered.insert(key, Discovered { tls });
+                self.discovered.insert(
+                    key,
+                    Discovered {
+                        tls,
+                        name: name.clone(),
+                        no_name_logged: false,
+                    },
+                );
                 self.servers.push(Server::new_discovered(discovered_addr));
             }
         }
@@ -570,9 +631,10 @@ impl Connector {
                             error,
                         ))
                     }
-                    // A TLS error's text names the setting that asked for TLS. Other errors keep
-                    // only their kind: their text can quote a line from the server, which is not
-                    // escaped.
+                    // A TLS error's text says what asked for TLS or why a certificate cannot be
+                    // verified; the server addresses and names it quotes are escaped. Other errors
+                    // keep only their kind: their text can quote a line from the server, which is
+                    // not escaped.
                     ConnectErrorKind::Tls => {
                         self.events_tx
                             .try_send(Event::ClientError(ClientError::Other(error.to_string())))
@@ -598,7 +660,10 @@ impl Connector {
             let info_snapshot = self.last_info.clone();
             let selection = callback.call((pool_snapshot, info_snapshot)).await;
 
-            if let Some(target) = selection {
+            // A selected server with no name to verify against is skipped as below.
+            if let Some(target) =
+                selection.filter(|target| !self.skip_without_tls_name(&target.addr))
+            {
                 // Validate the selected server is in the pool as the snapshot lists it, and
                 // connect to it by the address the pool keeps for it.
                 let selected = self
@@ -665,6 +730,10 @@ impl Connector {
             // sort_by is stable, meaning it will retain the order for equal elements.
             servers.sort_by_key(|a| a.failed_attempts);
         }
+
+        // A server with no name to verify its certificate against is skipped: it costs no
+        // attempt and no sleep. A configured server always has a name.
+        servers.retain(|server| !self.skip_without_tls_name(&server.addr));
 
         for entry in servers {
             self.attempts += 1;
@@ -878,16 +947,15 @@ impl Connector {
             ),
         };
 
-        // Discovered IP servers are verified against the DNS name of the
-        // server they were discovered through rather than the bare IP.
-        let tls_name = self
-            .tls_names
-            .get(&server_addr)
-            .cloned()
-            .unwrap_or_else(|| server_addr.host().to_string());
+        // A discovered server without a name is not connected to over TLS. It is skipped
+        // when it is known to need TLS; it fails here when its INFO asks for TLS.
+        let tls_name = self.tls_name(&server_addr);
 
         let tls_connection = |connection: Connection| async {
-            let tls_stream = self.tls_handshake(connection.stream, &tls_name).await?;
+            let tls_name = tls_name.ok_or_else(|| {
+                ConnectError::with_source(crate::ConnectErrorKind::Tls, no_tls_name(&server_addr))
+            })?;
+            let tls_stream = self.tls_handshake(connection.stream, tls_name).await?;
 
             Ok::<Connection, ConnectError>(Connection::new(
                 Box::new(tls_stream),
@@ -965,7 +1033,7 @@ impl Connector {
 
         // Discover servers from INFO.
         if !self.options.ignore_discovered_servers {
-            self.add_discovered_servers(&info.connect_urls, &server_addr, tls, &tls_name);
+            self.add_discovered_servers(&info.connect_urls, &server_addr, tls);
         }
 
         // Build CONNECT message with auth info.
@@ -1321,11 +1389,11 @@ mod tests {
             addr("ws://seed.example:8080"),
         );
 
-        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &tcp, false, "seed.example");
-        connector.add_discovered_servers(&["10.0.0.3:4222".into()], &tcp, true, "seed.example");
-        connector.add_discovered_servers(&["10.0.0.4:8080".into()], &ws, false, "seed.example");
-        connector.add_discovered_servers(&["10.0.0.5:8080".into()], &ws, true, "seed.example");
-        connector.add_discovered_servers(&["10.0.0.6:80".into()], &ws, true, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &tcp, false);
+        connector.add_discovered_servers(&["10.0.0.3:4222".into()], &tcp, true);
+        connector.add_discovered_servers(&["10.0.0.4:8080".into()], &ws, false);
+        connector.add_discovered_servers(&["10.0.0.5:8080".into()], &ws, true);
+        connector.add_discovered_servers(&["10.0.0.6:80".into()], &ws, true);
 
         assert_eq!(
             pool(&connector)[1..],
@@ -1366,11 +1434,11 @@ mod tests {
         let seed = addr("nats://seed.example:4222");
         let discovered = addr("nats://10.0.0.2:4222");
 
-        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false);
         assert!(!connector.learned_over_tls(&discovered));
-        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true);
         assert!(connector.learned_over_tls(&discovered));
-        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false, "seed.example");
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, false);
         assert!(connector.learned_over_tls(&discovered));
         assert_eq!(
             pool(&connector),
@@ -1395,7 +1463,7 @@ mod tests {
             },
         );
         let seed = addr("tls://nats.example.com:4222");
-        optional.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true, "nats.example.com");
+        optional.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true);
         optional
             .set_server_pool(vec![addr("nats://10.0.0.2:4222")])
             .unwrap();
@@ -1404,9 +1472,22 @@ mod tests {
             &["10.0.0.2:4222".into()],
             &addr("nats://10.0.0.2:4222"),
             true,
-            "10.0.0.2",
         );
         assert!(!optional.learned_over_tls(&addr("nats://10.0.0.2:4222")));
+
+        // A discovered IP address given in a pool is verified against itself.
+        for seed in ["tls://10.0.0.1:4222", "tls://nats.example.com:4222"] {
+            let mut pooled = connector(&[seed], options());
+            pooled.add_discovered_servers(&["10.0.0.2:4222".into()], &addr(seed), true);
+            pooled
+                .set_server_pool(vec![addr("tls://10.0.0.2:4222")])
+                .unwrap();
+            assert_eq!(
+                tls_name(&pooled, "tls://10.0.0.2:4222").as_deref(),
+                Some("10.0.0.2")
+            );
+            assert!(!pooled.skip_without_tls_name(&addr("tls://10.0.0.2:4222")));
+        }
     }
 
     #[test]
@@ -1414,12 +1495,7 @@ mod tests {
         let seed = addr("nats://seed.example.com:4222");
         let learned = || {
             let mut learned = connector(&["nats://seed.example.com:4222"], options());
-            learned.add_discovered_servers(
-                &["10.0.0.2:4222".into()],
-                &seed,
-                true,
-                "seed.example.com",
-            );
+            learned.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true);
             for server in &mut learned.servers {
                 server.failed_attempts = 2;
                 server.did_connect = true;
@@ -1470,18 +1546,8 @@ mod tests {
         let seed = addr("nats://seed.example.com:4222");
         let learned = || {
             let mut learned = connector(&["nats://seed.example.com:4222"], options());
-            learned.add_discovered_servers(
-                &["10.0.0.2:4222".into()],
-                &seed,
-                true,
-                "seed.example.com",
-            );
-            learned.add_discovered_servers(
-                &["10.0.0.3:4222".into()],
-                &seed,
-                false,
-                "seed.example.com",
-            );
+            learned.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true);
+            learned.add_discovered_servers(&["10.0.0.3:4222".into()], &seed, false);
             learned
         };
         let (with_tls, without_tls) = (addr("nats://10.0.0.2:4222"), addr("nats://10.0.0.3:4222"));
@@ -1530,7 +1596,6 @@ mod tests {
             &[format!("{host}:4222")],
             &addr("nats://seed.example.com:4222"),
             true,
-            "seed.example.com",
         );
 
         let listed = connector
@@ -1553,12 +1618,7 @@ mod tests {
         // Also when a TCP server with the same host and port was learned over TLS.
         let mut connector = connector(&["nats://seed.example.com:4222"], options());
         let seed = addr("nats://seed.example.com:4222");
-        connector.add_discovered_servers(
-            &["10.0.0.2:4222".into()],
-            &seed,
-            true,
-            "seed.example.com",
-        );
+        connector.add_discovered_servers(&["10.0.0.2:4222".into()], &seed, true);
         let ws = addr("ws://10.0.0.2:4222");
         connector.set_server_pool(vec![ws.clone()]).unwrap();
         assert!(!connector.learned_over_tls(&ws));
@@ -1582,7 +1642,6 @@ mod tests {
             ],
             &seed,
             true,
-            "seed.example",
         );
 
         assert_eq!(
@@ -1595,6 +1654,129 @@ mod tests {
         );
         // A configured server keeps how the user configured it.
         assert!(!connector.learned_over_tls(&seed));
+    }
+
+    fn tls_name(connector: &Connector, url: &str) -> Option<String> {
+        connector.tls_name(&addr(url)).map(str::to_owned)
+    }
+
+    #[test]
+    fn a_server_learned_over_tls_is_verified_against_the_name_it_was_learned_under() {
+        let mut connector = connector(&["tls://nats.example.com:4222"], options());
+        let seed = addr("tls://nats.example.com:4222");
+
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into(), "node3.example.com:4222".into()],
+            &seed,
+            true,
+        );
+        // Over any number of hops: from an IP address verified under the seed's name, and
+        // from a host name verified under its own.
+        connector.add_discovered_servers(
+            &["10.0.0.4:4222".into()],
+            &addr("nats://10.0.0.2:4222"),
+            true,
+        );
+        connector.add_discovered_servers(
+            &["10.0.0.5:4222".into()],
+            &addr("nats://node3.example.com:4222"),
+            true,
+        );
+
+        for (url, name) in [
+            ("tls://nats.example.com:4222", "nats.example.com"),
+            ("nats://10.0.0.2:4222", "nats.example.com"),
+            ("nats://node3.example.com:4222", "node3.example.com"),
+            ("nats://10.0.0.4:4222", "nats.example.com"),
+            ("nats://10.0.0.5:4222", "node3.example.com"),
+        ] {
+            assert_eq!(tls_name(&connector, url).as_deref(), Some(name), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_server_learned_without_tls_follows_the_configured_name() {
+        let mut connector = connector(
+            &[
+                "nats://nats.example.com:4222",
+                "tls://nats2.example.com:4222",
+            ],
+            ConnectorOptions {
+                tls_optional: true,
+                ..options()
+            },
+        );
+        let seed = addr("nats://nats.example.com:4222");
+
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into(), "node3.example.com:4222".into()],
+            &seed,
+            false,
+        );
+        connector.add_discovered_servers(
+            &["10.0.0.3:4222".into()],
+            &addr("nats://node3.example.com:4222"),
+            false,
+        );
+        // A discovered IP address is one more address of the configured server's name,
+        // over any number of hops. A host name learned without TLS has no name.
+        assert_eq!(
+            tls_name(&connector, "nats://10.0.0.2:4222").as_deref(),
+            Some("nats.example.com")
+        );
+        assert_eq!(
+            tls_name(&connector, "nats://10.0.0.3:4222").as_deref(),
+            Some("nats.example.com")
+        );
+        assert_eq!(tls_name(&connector, "nats://node3.example.com:4222"), None);
+
+        // Learned again over TLS, they gain TLS and take the name of that report.
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into(), "node3.example.com:4222".into()],
+            &addr("tls://nats2.example.com:4222"),
+            true,
+        );
+        assert_eq!(
+            tls_name(&connector, "nats://10.0.0.2:4222").as_deref(),
+            Some("nats2.example.com")
+        );
+        assert_eq!(
+            tls_name(&connector, "nats://node3.example.com:4222").as_deref(),
+            Some("node3.example.com")
+        );
+        // A later report does not change the name of a server that already has TLS.
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into()],
+            &addr("tls://nats.example.com:4222"),
+            true,
+        );
+        assert_eq!(
+            tls_name(&connector, "nats://10.0.0.2:4222").as_deref(),
+            Some("nats2.example.com")
+        );
+    }
+
+    #[test]
+    fn a_discovered_server_without_a_name_is_skipped() {
+        let mut connector = connector(&["tls://10.0.0.1:4222"], options());
+        let seed = addr("tls://10.0.0.1:4222");
+        connector.add_discovered_servers(
+            &["10.0.0.2:4222".into(), "node3.example.com:4222".into()],
+            &seed,
+            true,
+        );
+
+        // A configured IP address is verified against itself; the IP addresses it reports
+        // have no host name to be verified against.
+        assert_eq!(
+            tls_name(&connector, "tls://10.0.0.1:4222").as_deref(),
+            Some("10.0.0.1")
+        );
+        assert_eq!(tls_name(&connector, "nats://10.0.0.2:4222"), None);
+        assert!(!connector.skip_without_tls_name(&seed));
+        assert!(connector.skip_without_tls_name(&addr("nats://10.0.0.2:4222")));
+        assert!(!connector.skip_without_tls_name(&addr("nats://node3.example.com:4222")));
+        assert!(connector.discovered[&("10.0.0.2".to_string(), 4222)].no_name_logged);
     }
 
     #[test]

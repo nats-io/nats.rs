@@ -101,10 +101,19 @@ mod discovered_servers {
         info
     }
 
-    /// A scripted server on 127.0.0.1. It sends INFO with `info` merged in, upgrades to
-    /// TLS after INFO when it has a certificate, sends every CONNECT it receives to
-    /// `connects`, and answers every PING with PONG. Dropping it closes the listener and
-    /// every connection.
+    /// How a scripted server uses TLS: the certificate and key it presents, and whether it
+    /// starts with the TLS handshake (`handshake_first`) instead of upgrading after INFO.
+    #[derive(Clone, Copy)]
+    struct Tls {
+        cert: &'static str,
+        key: &'static str,
+        first: bool,
+    }
+
+    /// A scripted server on 127.0.0.1. It sends INFO with `info` merged in, uses TLS when
+    /// it has a certificate, sends every CONNECT it receives to `connects` with the name
+    /// the client sent as SNI added as `sni`, and answers every PING with PONG. Dropping
+    /// it closes the listener and every connection.
     struct FakeServer {
         port: u16,
         connects: mpsc::UnboundedReceiver<Value>,
@@ -123,12 +132,33 @@ mod discovered_servers {
         }
 
         /// A server that requires TLS, with a certificate for `localhost` from the test CA.
-        async fn tls(mut info: Value) -> FakeServer {
-            info["tls_required"] = json!(true);
-            FakeServer::start(info, Some(("server-cert.pem", "server-key.pem"))).await
+        async fn tls(info: Value) -> FakeServer {
+            FakeServer::tls_with(info, "server-cert.pem", "server-key.pem").await
         }
 
-        async fn start(info: Value, tls: Option<(&'static str, &'static str)>) -> FakeServer {
+        /// A server that requires TLS and presents `cert`.
+        async fn tls_with(mut info: Value, cert: &'static str, key: &'static str) -> FakeServer {
+            info["tls_required"] = json!(true);
+            let tls = Tls {
+                cert,
+                key,
+                first: false,
+            };
+            FakeServer::start(info, Some(tls)).await
+        }
+
+        /// A server that starts with the TLS handshake and sends INFO over TLS.
+        async fn tls_first(mut info: Value) -> FakeServer {
+            info["tls_required"] = json!(true);
+            let tls = Tls {
+                cert: "server-cert.pem",
+                key: "server-key.pem",
+                first: true,
+            };
+            FakeServer::start(info, Some(tls)).await
+        }
+
+        async fn start(info: Value, tls: Option<Tls>) -> FakeServer {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let port = listener.local_addr().unwrap().port();
             let (tx, connects) = mpsc::unbounded_channel();
@@ -165,7 +195,11 @@ mod discovered_servers {
 
         /// The next CONNECT this server receives, if one arrives within five seconds.
         async fn next_connect(&mut self) -> Option<Value> {
-            tokio::time::timeout(Duration::from_secs(5), self.connects.recv())
+            self.connect_within(Duration::from_secs(5)).await
+        }
+
+        async fn connect_within(&mut self, wait: Duration) -> Option<Value> {
+            tokio::time::timeout(wait, self.connects.recv())
                 .await
                 .ok()
                 .flatten()
@@ -176,15 +210,27 @@ mod discovered_servers {
         mut stream: TcpStream,
         port: u16,
         info: Value,
-        tls: Option<(&'static str, &'static str)>,
+        tls: Option<Tls>,
         connects: mpsc::UnboundedSender<Value>,
     ) -> std::io::Result<()> {
-        stream
-            .write_all(&info_line(&server_info(port, info)))
-            .await?;
+        let info = info_line(&server_info(port, info));
+        let mut sni = None;
         let mut stream: Box<dyn Stream> = match tls {
-            Some((cert, key)) => Box::new(acceptor(cert, key).accept(stream).await?),
-            None => Box::new(stream),
+            Some(tls) => {
+                if !tls.first {
+                    stream.write_all(&info).await?;
+                }
+                let mut stream = acceptor(tls.cert, tls.key).accept(stream).await?;
+                sni = stream.get_ref().1.server_name().map(str::to_owned);
+                if tls.first {
+                    stream.write_all(&info).await?;
+                }
+                Box::new(stream)
+            }
+            None => {
+                stream.write_all(&info).await?;
+                Box::new(stream)
+            }
         };
 
         let mut buf = Vec::new();
@@ -198,7 +244,10 @@ mod discovered_servers {
             while let Some(end) = buf.windows(2).position(|w| w == b"\r\n") {
                 let line: Vec<u8> = buf.drain(..end + 2).collect();
                 if let Some(connect) = line.strip_prefix(b"CONNECT ") {
-                    if let Ok(connect) = serde_json::from_slice(&connect[..connect.len() - 2]) {
+                    if let Ok(mut connect) =
+                        serde_json::from_slice::<Value>(&connect[..connect.len() - 2])
+                    {
+                        connect["sni"] = json!(sni);
                         connects.send(connect).ok();
                     }
                 } else if line == b"PING\r\n" {
@@ -208,8 +257,10 @@ mod discovered_servers {
         }
     }
 
-    /// Steers reconnects: the reconnect callback picks the pool entry with the port set
-    /// here, without a delay.
+    /// Steers the next reconnect: the reconnect callback picks the pool entry with the
+    /// port set here, once, with the client's own reconnect delay. When that attempt fails,
+    /// the client goes on as without the callback, so it can get back to a working server
+    /// and answer queries again.
     #[derive(Clone, Default)]
     struct Steer(Arc<Mutex<Option<u16>>>);
 
@@ -221,31 +272,31 @@ mod discovered_servers {
         fn options(&self, options: ConnectOptions) -> ConnectOptions {
             let target = self.0.clone();
             options.reconnect_to_server_callback(move |servers, _| {
-                let port = *target.lock().unwrap();
+                let port = target.lock().unwrap().take();
                 let server = servers
                     .into_iter()
                     .find(|server| Some(server.addr.port()) == port);
                 async move {
                     server.map(|server| ReconnectToServer {
                         addr: server.addr,
-                        delay: Some(Duration::ZERO),
+                        delay: None,
                     })
                 }
             })
         }
     }
 
-    /// Listens on 127.0.0.1, sends an INFO that offers TLS without requiring it, like a
-    /// server with `allow_non_tls`, and reports the first bytes each client sends back.
-    async fn canary_offering_tls() -> (u16, mpsc::UnboundedReceiver<Vec<u8>>) {
+    /// Listens on 127.0.0.1, sends INFO with `info` merged in, and reports the first bytes
+    /// each client sends back, none when it closes the connection.
+    async fn canary(info: Value) -> (u16, mpsc::UnboundedReceiver<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
-                let tx = tx.clone();
+                let (tx, info) = (tx.clone(), info.clone());
                 tokio::spawn(async move {
-                    let info = server_info(port, json!({ "tls_available": true }));
+                    let info = server_info(port, info);
                     let mut first = [0u8; 16];
                     if stream.write_all(&info_line(&info)).await.is_ok() {
                         if let Ok(n) = stream.read(&mut first).await {
@@ -287,6 +338,26 @@ mod discovered_servers {
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    /// Waits until the server with `port` in the client's pool has a last error, and
+    /// returns it.
+    async fn last_error(client: &async_nats::Client, port: u16) -> String {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let pool = client.server_pool().await.unwrap();
+            let server = pool.iter().find(|server| server.addr.port() == port);
+            if let Some(error) = server.and_then(|server| server.last_error.clone()) {
+                return error;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{pool:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Options that trust the test CA, which issued the `localhost` certificate.
+    fn test_ca() -> ConnectOptions {
+        ConnectOptions::new().add_root_certificates(certs("rootCA.pem"))
     }
 
     async fn pool_urls(client: &async_nats::Client) -> Vec<String> {
@@ -383,7 +454,8 @@ mod discovered_servers {
     // URL whose INFO requires TLS.
     #[tokio::test]
     async fn server_learned_over_tls_is_connected_to_with_tls() {
-        let (canary_port, mut canary) = canary_offering_tls().await;
+        // Its INFO offers TLS without requiring it, like a server with `allow_non_tls`.
+        let (canary_port, mut canary) = canary(json!({ "tls_available": true })).await;
         let seed =
             FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{canary_port}")] })).await;
         let steer = Steer::default();
@@ -529,5 +601,187 @@ mod discovered_servers {
         client.force_reconnect().await.unwrap();
         reconnected_to(&client, "node2").await;
         client.flush().await.unwrap();
+    }
+
+    // A discovered IP address learned over TLS is verified against the name the server
+    // that reported it was verified under, over any number of hops, and that name is
+    // sent as SNI. The certificate names localhost, not 127.0.0.1.
+    #[tokio::test]
+    async fn discovered_ip_is_verified_against_the_name_of_its_reporter() {
+        let mut third = FakeServer::tls(json!({})).await;
+        let mut second =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", third.port)] })).await;
+        let seed =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca())
+            .connect(format!("tls://localhost:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(second.next_connect().await.unwrap()["sni"], "localhost");
+        steer.to(third.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(third.next_connect().await.unwrap()["sni"], "localhost");
+    }
+
+    // The same with TLS first, where INFO and its list arrive over TLS.
+    #[tokio::test]
+    async fn discovered_ip_is_verified_against_the_name_of_its_reporter_with_tls_first() {
+        let mut second = FakeServer::tls_first(json!({})).await;
+        let seed = FakeServer::tls_first(
+            json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }),
+        )
+        .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca().tls_first())
+            .connect(format!("tls://localhost:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(second.next_connect().await.unwrap()["sni"], "localhost");
+    }
+
+    // A discovered IP address learned without TLS, connected to with TLS because its own
+    // INFO requires it, is one more address of the configured server's host name: it is
+    // verified against that name, which is sent as SNI.
+    #[tokio::test]
+    async fn discovered_ip_learned_without_tls_is_verified_against_the_configured_name() {
+        let mut second = FakeServer::tls(json!({})).await;
+        let seed =
+            FakeServer::plain(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca().tls_optional())
+            .connect(format!("nats://localhost:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert_eq!(second.next_connect().await.unwrap()["sni"], "localhost");
+    }
+
+    // A discovered host name learned without TLS is not trusted as a name: when its INFO
+    // requires TLS, the attempt fails before the TLS handshake.
+    #[tokio::test]
+    async fn host_name_learned_without_tls_is_not_connected_to_over_tls() {
+        let (canary_port, mut canary) = canary(json!({ "tls_required": true })).await;
+        let seed =
+            FakeServer::plain(json!({ "connect_urls": [format!("localhost:{canary_port}")] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(ConnectOptions::new())
+            .connect(seed.url())
+            .await
+            .unwrap();
+
+        steer.to(canary_port);
+        client.force_reconnect().await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), canary.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        // The client closed the connection without a TLS handshake.
+        assert_eq!(first, Vec::<u8>::new());
+    }
+
+    // A discovered IP address reported by a server reached by an IP address has no name
+    // to be verified against. It is skipped: no attempt, so no failure is counted, and
+    // the client connects to another server.
+    #[tokio::test]
+    async fn discovered_ip_without_a_name_is_skipped() {
+        let mut second = FakeServer::tls_with(json!({}), "ip-cert.pem", "ip-key.pem").await;
+        let mut seed = FakeServer::tls_with(
+            json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }),
+            "ip-cert.pem",
+            "ip-key.pem",
+        )
+        .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(ConnectOptions::new().add_root_certificates(certs("ip-ca.pem")))
+            .connect(format!("tls://127.0.0.1:{}", seed.port))
+            .await
+            .unwrap();
+        // No SNI is sent for an IP address.
+        assert_eq!(seed.next_connect().await.unwrap()["sni"], Value::Null);
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert!(seed.next_connect().await.is_some());
+        assert!(second
+            .connect_within(Duration::from_millis(500))
+            .await
+            .is_none());
+        let pool = client.server_pool().await.unwrap();
+        let skipped = pool
+            .iter()
+            .find(|server| server.addr.port() == second.port)
+            .unwrap();
+        assert_eq!(skipped.failed_attempts, 0, "{pool:?}");
+        assert_eq!(skipped.last_error, None, "{pool:?}");
+    }
+
+    // The name a discovered server inherits does not weaken the check: a certificate from
+    // the test CA for another name is not accepted.
+    #[tokio::test]
+    async fn discovered_server_with_a_certificate_for_another_name_is_not_connected_to() {
+        let mut second =
+            FakeServer::tls_with(json!({}), "wrong-name-cert.pem", "wrong-name-key.pem").await;
+        let seed =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca())
+            .connect(format!("tls://localhost:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+        assert!(second
+            .connect_within(Duration::from_secs(1))
+            .await
+            .is_none());
+    }
+
+    // Nor is a certificate for the inherited name, and for 127.0.0.1, from a CA the
+    // client does not trust.
+    #[tokio::test]
+    async fn discovered_server_with_a_certificate_from_another_ca_is_not_connected_to() {
+        let second = FakeServer::tls_with(json!({}), "ip-cert.pem", "ip-key.pem").await;
+        let seed =
+            FakeServer::tls(json!({ "connect_urls": [format!("127.0.0.1:{}", second.port)] }))
+                .await;
+        let steer = Steer::default();
+
+        let client = steer
+            .options(test_ca())
+            .connect(format!("tls://localhost:{}", seed.port))
+            .await
+            .unwrap();
+
+        steer.to(second.port);
+        client.force_reconnect().await.unwrap();
+
+        let error = last_error(&client, second.port).await;
+        assert!(error.contains("UnknownIssuer"), "{error}");
     }
 }
