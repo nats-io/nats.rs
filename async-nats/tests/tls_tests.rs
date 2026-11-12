@@ -199,6 +199,9 @@ mod client {
         assert!(client.server_info().tls_required);
     }
 
+    // nats-server before 2.12 lists a formed cluster's servers to a client that starts TLS
+    // after INFO only in the INFO read before TLS, which the client does not use.
+    #[cfg(feature = "server_2_12")]
     #[tokio::test]
     async fn discovered_ip_servers_keep_tls_name() {
         // Servers advertise 127.0.0.1, while the certificate is only valid

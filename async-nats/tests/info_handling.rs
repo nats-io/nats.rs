@@ -518,4 +518,110 @@ mod info_handling {
             assert!(matches!(connected, Ok(Ok(_))), "{case}");
         }
     }
+
+    // On a connection that starts TLS after INFO, the servers of the INFO read before the
+    // handshake are not used.
+    #[tokio::test]
+    async fn does_not_use_the_servers_of_the_info_read_before_tls() {
+        let server = Server::start(
+            Tls::AfterInfo,
+            listing(&[4001]),
+            vec![Step::Line("PONG"), Step::Info(json!({}))],
+        )
+        .await;
+
+        let client = test_ca().connect(server.url()).await.unwrap();
+
+        assert_eq!(pool_urls(&client).await, [server.url()]);
+    }
+
+    // Nor when the attempt fails: after a failed handshake, here a certificate not issued
+    // for 127.0.0.1, or after a handshake that succeeded, when the server refuses the
+    // client. The client then connects to the third server.
+    #[tokio::test]
+    async fn does_not_use_the_servers_of_the_info_read_before_tls_when_the_attempt_fails() {
+        let untrusted = Server::start(Tls::AfterInfo, listing(&[4001]), vec![]).await;
+        let refusing = Server::start(
+            Tls::AfterInfo,
+            listing(&[4002]),
+            vec![
+                Step::Line("-ERR 'maximum account active connections exceeded'"),
+                Step::Close,
+            ],
+        )
+        .await;
+        let accepting = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(json!({}))],
+        )
+        .await;
+        let urls = [
+            format!("nats://127.0.0.1:{}", untrusted.port),
+            refusing.url(),
+            accepting.url(),
+        ];
+
+        let client = test_ca()
+            .retain_servers_order()
+            .connect(urls.as_slice())
+            .await
+            .unwrap();
+
+        assert_eq!(pool_urls(&client).await, urls);
+        let pool = client.server_pool().await.unwrap();
+        let errors: Vec<_> = pool
+            .iter()
+            .map(|server| server.last_error.clone())
+            .collect();
+        assert!(
+            errors[0]
+                .as_ref()
+                .is_some_and(|error| error.contains("certificate")),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1]
+                .as_ref()
+                .is_some_and(|error| error.contains("maximum account active connections exceeded")),
+            "{errors:?}"
+        );
+    }
+
+    // Without TLS, and with TLS first, the client uses the servers of the first INFO, also
+    // when the server then refuses it: a configured server that refuses the client still
+    // leads to its peers. A peer listed without TLS is listed as nats://.
+    #[tokio::test]
+    async fn uses_the_servers_of_the_first_info_of_a_refused_attempt_without_tls_after_info() {
+        for (tls, options, peer) in [
+            (
+                Tls::None,
+                ConnectOptions::new(),
+                "nats://127.0.0.1:4001".to_string(),
+            ),
+            (Tls::First, test_ca().tls_first(), listed(4001)),
+        ] {
+            let refusing = Server::start(
+                tls,
+                listing(&[4001]),
+                vec![
+                    Step::Line("-ERR 'maximum account active connections exceeded'"),
+                    Step::Close,
+                ],
+            )
+            .await;
+            let accepting = Server::start(tls, json!({}), vec![Step::Line("PONG")]).await;
+
+            let client = options
+                .retain_servers_order()
+                .connect([refusing.url(), accepting.url()].as_slice())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                pool_urls(&client).await,
+                [refusing.url(), accepting.url(), peer]
+            );
+        }
+    }
 }
