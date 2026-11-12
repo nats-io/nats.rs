@@ -170,7 +170,7 @@ jobs:
         # The binaries that exercise the TLS backend, named, so that a test is run by what
         # it covers and not by whether "tls" occurs in its name.
         run: |
-          cargo test --test tls_options --test tls_tests --test websocket_test --test discovered_servers --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
+          cargo test --test tls_options --test tls_tests --test websocket_test --test discovered_servers --test info_handling --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }} -- --nocapture
       - name: Run the unit and TLS option tests without websockets
         if: matrix.tls_feature == 'ring'
         env:

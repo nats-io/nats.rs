@@ -112,8 +112,9 @@ mod discovered_servers {
 
     /// A scripted server on 127.0.0.1. It sends INFO with `info` merged in, uses TLS when
     /// it has a certificate, sends every CONNECT it receives to `connects` with the name
-    /// the client sent as SNI added as `sni`, and answers every PING with PONG. Dropping
-    /// it closes the listener and every connection.
+    /// the client sent as SNI added as `sni`, and answers every PING with PONG. Like
+    /// nats-server 2.12 and later, it sends the INFO again after the first PONG, inside TLS
+    /// when it has TLS. Dropping it closes the listener and every connection.
     struct FakeServer {
         port: u16,
         connects: mpsc::UnboundedReceiver<Value>,
@@ -235,6 +236,7 @@ mod discovered_servers {
 
         let mut buf = Vec::new();
         let mut chunk = [0u8; 4096];
+        let mut info_after_pong = Some(info);
         loop {
             let n = stream.read(&mut chunk).await?;
             if n == 0 {
@@ -252,6 +254,9 @@ mod discovered_servers {
                     }
                 } else if line == b"PING\r\n" {
                     stream.write_all(b"PONG\r\n").await?;
+                    if let Some(info) = info_after_pong.take() {
+                        stream.write_all(&info).await?;
+                    }
                 }
             }
         }

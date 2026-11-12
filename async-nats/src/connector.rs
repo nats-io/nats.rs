@@ -380,6 +380,67 @@ fn quoted(entry: &str) -> String {
     format!("{:?}", &entry[..end])
 }
 
+/// Whether the server of an INFO with `version` sends another INFO after the first PONG,
+/// which nats-server does from 2.12.0 on. As nats-server compares versions, only the three
+/// numbers count, so a pre-release counts as its release. A version whose part before any
+/// `-` or `+` is not exactly three numbers counts as earlier.
+fn sends_info_after_first_pong(version: &str) -> bool {
+    let core = version.split(['-', '+']).next().unwrap_or_default();
+    let mut parts = core.split('.').map(str::parse::<u64>);
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None)
+            if (major, minor, patch) >= (2, 12, 0)
+    )
+}
+
+/// Reads the next operation of an attempt after CONNECT. A PING is answered and `+OK` is
+/// skipped; a `-ERR`, a line that does not parse and a closed connection fail the attempt.
+async fn next_op(connection: &mut Connection) -> Result<ServerOp, ConnectError> {
+    loop {
+        match connection.read_op().await? {
+            Some(ServerOp::Ping) => {
+                connection
+                    .easy_write_and_flush([ClientOp::Pong].iter())
+                    .await?;
+            }
+            Some(ServerOp::Ok) => {}
+            Some(ServerOp::Error(err)) => {
+                return Err(match err {
+                    ServerError::AuthorizationViolation => {
+                        tracing::error!(error = %err, "authorization violation");
+                        ConnectError::with_source(
+                            crate::ConnectErrorKind::AuthorizationViolation,
+                            err,
+                        )
+                    }
+                    err => {
+                        tracing::error!(error = %err, "server error during connection");
+                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
+                    }
+                });
+            }
+            Some(op) => return Ok(op),
+            None => {
+                tracing::error!("connection closed unexpectedly");
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Io,
+                    "broken pipe",
+                ));
+            }
+        }
+    }
+}
+
+/// A connection up to the first PONG, as an attempt opens it.
+pub(crate) struct Handshake {
+    /// The INFO of the connection.
+    info: ServerInfo,
+    connection: Connection,
+    /// Whether the connection has TLS.
+    tls: bool,
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -858,13 +919,32 @@ impl Connector {
         let tls_required = server_addr.tls_required() || self.learned_over_tls(server_addr);
         let mut last_err = None;
         for socket_addr in socket_addrs {
-            match tokio::time::timeout(
+            let attempt = tokio::time::timeout(
                 self.options.connection_timeout,
                 self.try_connect_to(&socket_addr, tls_required, server_addr.clone()),
             )
-            .await
-            {
-                Ok(Ok((server_info, connection))) => {
+            .await;
+            // The wait for the INFO that follows the first PONG has a timer of its own.
+            let attempt = match attempt {
+                Ok(Ok(Handshake {
+                    info,
+                    mut connection,
+                    tls,
+                })) => self
+                    .info_after_first_pong(server_addr, info, &mut connection, tls)
+                    .await
+                    .map(|info| (info, connection)),
+                Ok(Err(err)) => Err(err),
+                Err(_) => {
+                    tracing::debug!(
+                        server = ?server_addr,
+                        "connection handshake timed out"
+                    );
+                    Err(ConnectError::new(crate::ConnectErrorKind::TimedOut))
+                }
+            };
+            match attempt {
+                Ok((server_info, connection)) => {
                     tracing::info!(
                         server = %server_info.port,
                         max_payload = %server_info.max_payload,
@@ -890,25 +970,13 @@ impl Connector {
                     return Ok((server_info, connection));
                 }
 
-                Ok(Err(inner)) => {
+                Err(inner) => {
                     // Update per-server state on failure.
                     if let Some(entry) = self.servers.iter_mut().find(|s| s.addr == *server_addr) {
                         entry.failed_attempts += 1;
                         entry.last_error = Some(inner.to_string());
                     }
                     last_err = Some(inner);
-                }
-
-                Err(_) => {
-                    tracing::debug!(
-                        server = ?server_addr,
-                        "connection handshake timed out"
-                    );
-                    if let Some(entry) = self.servers.iter_mut().find(|s| s.addr == *server_addr) {
-                        entry.failed_attempts += 1;
-                        entry.last_error = Some("timed out".to_string());
-                    }
-                    last_err = Some(ConnectError::new(crate::ConnectErrorKind::TimedOut));
                 }
             }
         }
@@ -1038,12 +1106,14 @@ impl Connector {
         message
     }
 
+    /// Connects to `socket_addr`, an address of `server_addr`, up to the first PONG, and
+    /// returns the first INFO, the connection and whether the connection has TLS.
     pub(crate) async fn try_connect_to(
         &mut self,
         socket_addr: &SocketAddr,
         tls_required: bool,
         server_addr: ServerAddr,
-    ) -> Result<(ServerInfo, Connection), ConnectError> {
+    ) -> Result<Handshake, ConnectError> {
         tracing::debug!(
             socket_addr = %socket_addr,
             tls_required = %tls_required,
@@ -1279,34 +1349,64 @@ impl Connector {
             connect_info.nkey = auth.nkey;
         }
 
-        // Send CONNECT + PING, then wait for PONG.
+        // Send CONNECT + PING, then wait for PONG. Other operations before it are skipped.
         connection
             .easy_write_and_flush([ClientOp::Connect(connect_info), ClientOp::Ping].iter())
             .await?;
+        while !matches!(next_op(&mut connection).await?, ServerOp::Pong) {}
 
-        match connection.read_op().await? {
-            Some(ServerOp::Error(err)) => match err {
-                ServerError::AuthorizationViolation => {
-                    tracing::error!(error = %err, "authorization violation");
-                    Err(ConnectError::with_source(
-                        crate::ConnectErrorKind::AuthorizationViolation,
-                        err,
-                    ))
-                }
-                err => {
-                    tracing::error!(error = %err, "server error during connection");
-                    Err(ConnectError::with_source(crate::ConnectErrorKind::Io, err))
-                }
-            },
-            Some(_) => Ok((*info, connection)),
-            None => {
-                tracing::error!("connection closed unexpectedly");
-                Err(ConnectError::with_source(
-                    crate::ConnectErrorKind::Io,
-                    "broken pipe",
-                ))
-            }
+        Ok(Handshake {
+            info: *info,
+            connection,
+            tls,
+        })
+    }
+
+    /// On a connection that started TLS after its first INFO, `info`, from a server whose
+    /// `version` there is 2.12.0 or later, waits for the INFO that nats-server sends after
+    /// the first PONG, and takes the servers it lists. The wait has a timer of its own, up
+    /// to the connection timeout; when the timer runs out, the client reports connected
+    /// without that INFO. Other operations are skipped. Returns the INFO of the connection.
+    ///
+    /// The `version` of `info`, read before the TLS handshake, decides only whether the
+    /// client waits, so a wrong one costs at most one wait.
+    ///
+    /// When that INFO gives lame duck mode, the client raises the lame duck event.
+    async fn info_after_first_pong(
+        &mut self,
+        server_addr: &ServerAddr,
+        info: ServerInfo,
+        connection: &mut Connection,
+        tls: bool,
+    ) -> Result<ServerInfo, ConnectError> {
+        let tls_after_info = tls && !self.options.tls_first && !server_addr.is_websocket();
+        if !tls_after_info
+            || self.options.ignore_discovered_servers
+            || !sends_info_after_first_pong(&info.version)
+        {
+            return Ok(info);
         }
+        let next_info = async {
+            loop {
+                if let ServerOp::Info(info) = next_op(connection).await? {
+                    return Ok::<_, ConnectError>(info);
+                }
+            }
+        };
+        match tokio::time::timeout(self.options.connection_timeout, next_info).await {
+            Ok(next_info) => {
+                let next_info = next_info?;
+                if next_info.lame_duck_mode {
+                    self.events_tx.try_send(Event::LameDuckMode).ok();
+                }
+                self.add_discovered_servers(&next_info.connect_urls, server_addr, true);
+            }
+            Err(_) => tracing::debug!(
+                server = ?server_addr,
+                "no INFO after the first PONG, connected without it"
+            ),
+        }
+        Ok(info)
     }
 }
 
@@ -2164,6 +2264,34 @@ mod tests {
         // Cut at a character boundary, never inside a character.
         let entry = format!("{}\u{e9}", "x".repeat(255));
         assert_eq!(quoted(&entry), format!("{:?}", "x".repeat(255)));
+    }
+
+    #[test]
+    fn waits_after_the_first_pong_only_for_2_12_0_and_later() {
+        // The version comes from the INFO read before TLS: a changed one costs at most one
+        // wait, or leaves the INFO that follows the first PONG to be taken when it arrives.
+        for (version, waits) in [
+            ("2.12.0", true),
+            ("2.12.1", true),
+            ("2.14.0", true),
+            ("3.0.0", true),
+            ("2.11.99", false),
+            ("1.99.0", false),
+            ("2", false),
+            ("2.12", false),
+            ("", false),
+            ("2.12.0-beta.1", true),
+            ("2.12.1-RC.1", true),
+            ("2.16.0-dev", true),
+            ("2.12.0+build", true),
+            ("2.11.0-beta.1", false),
+            ("2.12.0.1", false),
+            ("v2.12.0", false),
+            ("18446744073709551616.0.0", false),
+            ("2.18446744073709551616.0", false),
+        ] {
+            assert_eq!(sends_info_after_first_pong(version), waits, "{version:?}");
+        }
     }
 
     #[test]
