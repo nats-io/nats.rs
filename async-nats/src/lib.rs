@@ -808,7 +808,6 @@ impl ConnectionHandler {
                     }
                 }
             }
-            // TODO: we should probably update advertised server list here too.
             ServerOp::Info(info) => {
                 debug!("received INFO: server_id={}", info.server_id);
                 if info.lame_duck_mode {

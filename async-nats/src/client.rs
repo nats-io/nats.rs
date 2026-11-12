@@ -970,9 +970,11 @@ impl Client {
     /// every pool given since lists it, unless
     /// [`ConnectOptions::tls_optional`](crate::ConnectOptions::tls_optional) is set: each
     /// URL is then dialed with its own scheme. A pool that leaves a server out drops what
-    /// the client learned about it. [`Client::server_pool`] lists a discovered server the
-    /// client learned over TLS with a `tls://` or `wss://` URL, so a pool made from that list
-    /// keeps TLS for it; without `tls_optional`, that URL then asks for TLS, as below.
+    /// the client learned about it, and so does a list from the cluster that leaves out a
+    /// discovered server other than the one the client is connected to.
+    /// [`Client::server_pool`] lists a discovered server the client learned over TLS with a
+    /// `tls://` or `wss://` URL, so a pool made from that list keeps TLS for it; without
+    /// `tls_optional`, that URL then asks for TLS, as below.
     ///
     /// This also resets the global reconnection attempt counter, so any
     /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
