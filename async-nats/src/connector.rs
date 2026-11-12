@@ -1366,7 +1366,8 @@ impl Connector {
     /// `version` there is 2.12.0 or later, waits for the INFO that nats-server sends after
     /// the first PONG, and takes the servers it lists. The wait has a timer of its own, up
     /// to the connection timeout; when the timer runs out, the client reports connected
-    /// without that INFO. Other operations are skipped. Returns the INFO of the connection.
+    /// without that INFO. Other operations are skipped. Returns the INFO of the connection:
+    /// the one received inside TLS when it came, which replaces `info`.
     ///
     /// The `version` of `info`, read before the TLS handshake, decides only whether the
     /// client waits, so a wrong one costs at most one wait.
@@ -1400,13 +1401,24 @@ impl Connector {
                     self.events_tx.try_send(Event::LameDuckMode).ok();
                 }
                 self.add_discovered_servers(&next_info.connect_urls, server_addr, true);
+                Ok(*next_info)
             }
-            Err(_) => tracing::debug!(
-                server = ?server_addr,
-                "no INFO after the first PONG, connected without it"
-            ),
+            Err(_) => {
+                tracing::debug!(
+                    server = ?server_addr,
+                    "no INFO after the first PONG, connected without it"
+                );
+                Ok(info)
+            }
         }
-        Ok(info)
+    }
+
+    /// Takes an INFO that arrived on the established connection: its server info and
+    /// `max_payload` replace those the client has, which on a connection that started TLS
+    /// after INFO can come from the INFO read before the handshake.
+    pub(crate) fn info_received(&mut self, info: &ServerInfo) {
+        self.max_payload.store(info.max_payload, Ordering::Relaxed);
+        self.last_info = info.clone();
     }
 }
 
