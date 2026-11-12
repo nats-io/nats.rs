@@ -24,7 +24,7 @@ mod info_handling {
     use tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
         net::{TcpListener, TcpStream},
-        sync::mpsc,
+        sync::{broadcast, mpsc},
     };
     use tokio_util::sync::CancellationToken;
 
@@ -93,11 +93,13 @@ mod info_handling {
 
     /// A scripted server on 127.0.0.1. It sends INFO with `info` merged in, with
     /// `tls_required` when it has TLS, answers the first PING with `script` and every later
-    /// PING with PONG. Dropping it closes the listener and every connection.
+    /// PING with PONG, and sends the INFOs given to `send_info`. Dropping it closes the
+    /// listener and every connection.
     struct Server {
         port: u16,
         /// Gets one message for each connection that ran its script to the end.
         scripts_run: mpsc::UnboundedReceiver<()>,
+        infos: broadcast::Sender<Value>,
         stop: CancellationToken,
     }
 
@@ -112,8 +114,9 @@ mod info_handling {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let port = listener.local_addr().unwrap().port();
             let (script_run, scripts_run) = mpsc::unbounded_channel();
+            let (infos, _) = broadcast::channel(16);
             let stop = CancellationToken::new();
-            let token = stop.clone();
+            let (token, infos_tx) = (stop.clone(), infos.clone());
             tokio::spawn(async move {
                 loop {
                     let stream = tokio::select! {
@@ -125,10 +128,11 @@ mod info_handling {
                     };
                     let (info, script) = (info.clone(), script.clone());
                     let (script_run, token) = (script_run.clone(), token.clone());
+                    let infos = infos_tx.subscribe();
                     tokio::spawn(async move {
                         tokio::select! {
                             _ = token.cancelled() => {}
-                            _ = serve(stream, port, tls, info, script, script_run) => {}
+                            _ = serve(stream, port, tls, info, script, script_run, infos) => {}
                         }
                     });
                 }
@@ -136,8 +140,15 @@ mod info_handling {
             Server {
                 port,
                 scripts_run,
+                infos,
                 stop,
             }
+        }
+
+        /// Sends an INFO with `extra` merged in on every open connection, inside TLS where
+        /// the connection has TLS.
+        fn send_info(&self, extra: Value) {
+            self.infos.send(extra).unwrap();
         }
 
         fn url(&self) -> String {
@@ -159,6 +170,7 @@ mod info_handling {
         mut info: Value,
         script: Vec<Step>,
         script_run: mpsc::UnboundedSender<()>,
+        mut infos: broadcast::Receiver<Value>,
     ) -> std::io::Result<()> {
         if !matches!(tls, Tls::None) {
             info["tls_required"] = json!(true);
@@ -183,11 +195,18 @@ mod info_handling {
         let mut script = Some(script);
         let mut line = Vec::new();
         loop {
-            line.clear();
-            if stream.read_until(b'\n', &mut line).await? == 0 {
-                return Ok(());
+            tokio::select! {
+                read = stream.read_until(b'\n', &mut line) => if read? == 0 {
+                    return Ok(());
+                },
+                Ok(extra) = infos.recv() => {
+                    stream.get_mut().write_all(&info_line(port, &extra)).await?;
+                    continue;
+                }
             }
-            if line != b"PING\r\n" {
+            let ping = line == b"PING\r\n";
+            line.clear();
+            if !ping {
                 continue;
             }
             let Some(steps) = script.take() else {
@@ -623,5 +642,81 @@ mod info_handling {
                 [refusing.url(), accepting.url(), peer]
             );
         }
+    }
+
+    /// Waits until the client's server info names the server `name`.
+    async fn wait_for_server_name(client: &async_nats::Client, name: &str) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while client.server_info().server_name != name {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                client.server_info()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    // The INFO that follows the first PONG, received inside TLS, replaces the server info
+    // and max_payload of the INFO read before the handshake.
+    #[tokio::test]
+    async fn the_info_inside_tls_replaces_the_info_read_before_tls() {
+        let server = Server::start(
+            Tls::AfterInfo,
+            json!({ "server_name": "before-tls" }),
+            vec![
+                Step::Line("PONG"),
+                LATER,
+                Step::Info(json!({ "server_name": "inside-tls", "max_payload": 4096 })),
+            ],
+        )
+        .await;
+
+        let client = test_ca().connect(server.url()).await.unwrap();
+
+        assert_eq!(client.server_info().server_name, "inside-tls");
+        assert_eq!(client.server_info().max_payload, 4096);
+        assert_eq!(client.max_payload(), 4096);
+    }
+
+    // So does the first INFO inside TLS that arrives on the established connection, here
+    // from a server before 2.12, for which the client does not wait. The reconnect callback
+    // then gets its server info too.
+    #[tokio::test]
+    async fn an_info_on_the_established_connection_replaces_the_server_info() {
+        let server = Server::start(
+            Tls::AfterInfo,
+            json!({ "server_name": "before-tls", "version": "2.11.0" }),
+            vec![Step::Line("PONG")],
+        )
+        .await;
+        let (names_tx, mut names) = mpsc::unbounded_channel();
+        let client = test_ca()
+            .reconnect_to_server_callback(move |_, info| {
+                names_tx.send(info.server_name).ok();
+                async { None }
+            })
+            .connect(server.url())
+            .await
+            .unwrap();
+        assert_eq!(client.server_info().server_name, "before-tls");
+        // The first connect calls the callback too, before any INFO.
+        names.try_recv().unwrap();
+
+        server.send_info(json!({
+            "server_name": "inside-tls",
+            "version": "2.11.0",
+            "max_payload": 4096,
+        }));
+
+        wait_for_server_name(&client, "inside-tls").await;
+        assert_eq!(client.server_info().max_payload, 4096);
+        assert_eq!(client.max_payload(), 4096);
+        client.force_reconnect().await.unwrap();
+        let name = tokio::time::timeout(Duration::from_secs(5), names.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(name, "inside-tls");
     }
 }

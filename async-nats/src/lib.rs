@@ -815,6 +815,8 @@ impl ConnectionHandler {
                     debug!("server in lame duck mode");
                     self.connector.events_tx.try_send(Event::LameDuckMode).ok();
                 }
+                self.connector.info_received(&info);
+                let _ = self.info_sender.send(Some(*info));
             }
 
             _ => {
