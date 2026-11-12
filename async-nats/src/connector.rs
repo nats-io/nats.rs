@@ -189,6 +189,8 @@ pub(crate) struct Connector {
     /// pool listed them, and every pool since has listed them, keyed by host and port. Empty
     /// under `tls_optional`.
     kept_tls: HashSet<(String, u16)>,
+    /// The server of the established connection. `None` while the client connects.
+    current: Option<CurrentServer>,
 }
 
 /// What the client learned about a discovered server from the connections it was
@@ -205,6 +207,23 @@ struct Discovered {
     name: Option<String>,
     /// Whether the client logged that it has no name to verify the server against.
     no_name_logged: bool,
+}
+
+/// The server of the established connection, and whether that connection has TLS.
+#[derive(Clone)]
+struct CurrentServer {
+    addr: ServerAddr,
+    security: Security,
+}
+
+/// Whether a connection has TLS.
+#[derive(Clone)]
+enum Security {
+    Plaintext,
+    /// TLS, with the name the certificate was verified against.
+    Tls {
+        name: String,
+    },
 }
 
 /// A server's host and port as written: two entries with the same key are one server.
@@ -320,7 +339,7 @@ fn discovered_addr(entry: &str, websocket: bool) -> Result<ServerAddr, &'static 
 }
 
 /// Says that the discovered server `addr` has no name to verify its certificate against,
-/// and which settings give it one.
+/// and which settings give it one. The caller names the server.
 fn no_tls_name(addr: &ServerAddr) -> String {
     let remedy = if addr.host().parse::<IpAddr>().is_ok() {
         "tls_server_name() sets the name to verify every server against, or \
@@ -329,10 +348,7 @@ fn no_tls_name(addr: &ServerAddr) -> String {
     } else {
         "tls_server_name() sets the name to verify every server against"
     };
-    format!(
-        "{:?}: a discovered server with no name to verify its certificate against; {remedy}",
-        without_user_info(addr)
-    )
+    format!("a discovered server with no name to verify its certificate against; {remedy}")
 }
 
 /// A name a certificate presents, as rustls reports it (`DnsName("nats.example.com")`,
@@ -370,8 +386,8 @@ impl std::error::Error for NameCheckFailed {
     }
 }
 
-/// A `connect_urls` entry as a log line quotes it: cut at 256 bytes and escaped, since the
-/// server chose it.
+/// A text the server chose, such as a `connect_urls` entry or a URL with its host, as a log
+/// line quotes it: cut at 256 bytes and escaped, since the server chose it.
 fn quoted(entry: &str) -> String {
     let mut end = entry.len().min(256);
     while !entry.is_char_boundary(end) {
@@ -493,6 +509,7 @@ impl Connector {
             last_info: ServerInfo::default(),
             discovered: HashMap::new(),
             kept_tls: HashSet::new(),
+            current: None,
         })
     }
 
@@ -500,7 +517,9 @@ impl Connector {
     /// appear in both the old and new pools. Every server in the new pool is a configured
     /// server, verified as its URL says. One the client learned over TLS keeps TLS as long
     /// as every pool given since lists it, unless `tls_optional` is set: a pool URL then
-    /// keeps its own scheme.
+    /// keeps its own scheme. A pool that leaves out a server, or a list from the cluster
+    /// that leaves out a discovered server other than the current one, drops what the
+    /// client learned about it.
     ///
     /// A `tls://` or `wss://` URL in the pool asks for TLS as it does at connect, unless
     /// `tls_optional` is set: every later attempt uses TLS, and a later pool does not turn
@@ -668,7 +687,12 @@ impl Connector {
         if let Some(discovered) = self.discovered.get_mut(&server_key(addr)) {
             if !discovered.no_name_logged {
                 discovered.no_name_logged = true;
-                tracing::warn!("skipping {}", no_tls_name(addr));
+                // The server chose the host, and nothing has looked it up yet: it is cut.
+                tracing::warn!(
+                    "skipping {}: {}",
+                    quoted(&without_user_info(addr)),
+                    no_tls_name(addr)
+                );
             }
         }
         true
@@ -686,19 +710,35 @@ impl Connector {
     /// A discovered IP address is verified against the name `reporter` was verified under
     /// when `tls` is set, or else against the name of the configured server the client
     /// learned it through. The first report decides the name, unless a later one comes
-    /// over TLS and the server gains TLS: it then takes the name of that report.
+    /// over TLS and the server gains TLS: it then takes the name of that report. A server
+    /// the pool does not list, such as the current server after a pool that leaves it out,
+    /// lends no name to what it lists without TLS; with TLS it lends the name its connection
+    /// was verified under.
     fn add_discovered_servers(
         &mut self,
         connect_urls: &[String],
         reporter: &ServerAddr,
         tls: bool,
     ) {
+        let reporter_key = server_key(reporter);
         let name = if tls {
-            self.tls_name(reporter)
+            match &self.current {
+                Some(current) if server_key(&current.addr) == reporter_key => {
+                    match &current.security {
+                        Security::Tls { name } => Some(name.as_str()),
+                        Security::Plaintext => None,
+                    }
+                }
+                _ => self.tls_name(reporter),
+            }
         } else {
-            match self.discovered.get(&server_key(reporter)) {
+            match self.discovered.get(&reporter_key) {
                 Some(discovered) => discovered.name.as_deref(),
-                None => Some(reporter.host()),
+                None => self
+                    .servers
+                    .iter()
+                    .any(|server| server_key(&server.addr) == reporter_key)
+                    .then_some(reporter.host()),
             }
         }
         .filter(|name| name.parse::<IpAddr>().is_err())
@@ -735,6 +775,32 @@ impl Connector {
         }
     }
 
+    /// Replaces the discovered servers with those in `connect_urls`, from an INFO that
+    /// arrived on the established connection to `current`, which has TLS when `tls` is set.
+    /// The configured servers and `current` are kept. A discovered server that drops out of
+    /// the list and comes back is learned again, from the report that brings it back. An
+    /// INFO without servers changes nothing.
+    fn replace_discovered_servers(
+        &mut self,
+        connect_urls: &[String],
+        current: &ServerAddr,
+        tls: bool,
+    ) {
+        if connect_urls.is_empty() {
+            return;
+        }
+        let kept: HashSet<(String, u16)> = connect_urls
+            .iter()
+            .filter_map(|url| discovered_addr(url, current.is_websocket()).ok())
+            .map(|addr| server_key(&addr))
+            .chain([server_key(current)])
+            .collect();
+        self.servers
+            .retain(|server| !server.is_discovered || kept.contains(&server_key(&server.addr)));
+        self.discovered.retain(|key, _| kept.contains(key));
+        self.add_discovered_servers(connect_urls, current, tls);
+    }
+
     pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         loop {
             match self.try_connect().await {
@@ -769,6 +835,9 @@ impl Connector {
 
     pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), ConnectError> {
         tracing::debug!(attempt = %self.attempts, "connecting to server");
+        // The servers a new connection lists take the name that connection is verified
+        // under, not that of an earlier connection to the same server.
+        self.current = None;
         let mut error = None;
 
         // If a reconnect-to-server callback is set, try it first.
@@ -933,7 +1002,11 @@ impl Connector {
                 })) => self
                     .info_after_first_pong(server_addr, info, &mut connection, tls)
                     .await
-                    .map(|info| (info, connection)),
+                    .map(|info| Handshake {
+                        info,
+                        connection,
+                        tls,
+                    }),
                 Ok(Err(err)) => Err(err),
                 Err(_) => {
                     tracing::debug!(
@@ -944,7 +1017,11 @@ impl Connector {
                 }
             };
             match attempt {
-                Ok((server_info, connection)) => {
+                Ok(Handshake {
+                    info: server_info,
+                    connection,
+                    tls,
+                }) => {
                     tracing::info!(
                         server = %server_info.port,
                         max_payload = %server_info.max_payload,
@@ -959,6 +1036,16 @@ impl Connector {
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     self.last_info = server_info.clone();
+                    let security = match self.tls_name(server_addr) {
+                        Some(name) if tls => Security::Tls {
+                            name: name.to_owned(),
+                        },
+                        _ => Security::Plaintext,
+                    };
+                    self.current = Some(CurrentServer {
+                        addr: server_addr.clone(),
+                        security,
+                    });
 
                     // Update per-server state on success.
                     if let Some(entry) = self.servers.iter_mut().find(|s| s.addr == *server_addr) {
@@ -999,7 +1086,14 @@ impl Connector {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         let tls_name = tls_name.ok_or_else(|| {
-            ConnectError::with_source(crate::ConnectErrorKind::Tls, no_tls_name(server_addr))
+            ConnectError::with_source(
+                crate::ConnectErrorKind::Tls,
+                format!(
+                    "{:?}: {}",
+                    without_user_info(server_addr),
+                    no_tls_name(server_addr)
+                ),
+            )
         })?;
         tracing::debug!("upgrading connection to TLS");
         let tls_config = Arc::new(
@@ -1364,10 +1458,11 @@ impl Connector {
 
     /// On a connection that started TLS after its first INFO, `info`, from a server whose
     /// `version` there is 2.12.0 or later, waits for the INFO that nats-server sends after
-    /// the first PONG, and takes the servers it lists. The wait has a timer of its own, up
-    /// to the connection timeout; when the timer runs out, the client reports connected
-    /// without that INFO. Other operations are skipped. Returns the INFO of the connection:
-    /// the one received inside TLS when it came, which replaces `info`.
+    /// the first PONG, and replaces the discovered servers with the servers it lists. The
+    /// wait has a timer of its own, up to the connection timeout; when the timer runs out,
+    /// the client reports connected without that INFO. Other operations are skipped.
+    /// Returns the INFO of the connection: the one received inside TLS when it came, which
+    /// replaces `info`.
     ///
     /// The `version` of `info`, read before the TLS handshake, decides only whether the
     /// client waits, so a wrong one costs at most one wait.
@@ -1400,7 +1495,7 @@ impl Connector {
                 if next_info.lame_duck_mode {
                     self.events_tx.try_send(Event::LameDuckMode).ok();
                 }
-                self.add_discovered_servers(&next_info.connect_urls, server_addr, true);
+                self.replace_discovered_servers(&next_info.connect_urls, server_addr, true);
                 Ok(*next_info)
             }
             Err(_) => {
@@ -1415,10 +1510,18 @@ impl Connector {
 
     /// Takes an INFO that arrived on the established connection: its server info and
     /// `max_payload` replace those the client has, which on a connection that started TLS
-    /// after INFO can come from the INFO read before the handshake.
+    /// after INFO can come from the INFO read before the handshake, and its servers replace
+    /// the discovered servers.
     pub(crate) fn info_received(&mut self, info: &ServerInfo) {
         self.max_payload.store(info.max_payload, Ordering::Relaxed);
         self.last_info = info.clone();
+        if self.options.ignore_discovered_servers {
+            return;
+        }
+        if let Some(current) = self.current.clone() {
+            let tls = matches!(current.security, Security::Tls { .. });
+            self.replace_discovered_servers(&info.connect_urls, &current.addr, tls);
+        }
     }
 }
 
@@ -1940,6 +2043,69 @@ mod tests {
         assert!(!connector.learned_over_tls(&seed));
     }
 
+    #[test]
+    fn a_server_the_pool_left_out_lends_no_name_to_what_it_lists() {
+        // A connection without TLS to the configured server lists a host name, and the
+        // client then connects to that host without TLS.
+        let mut connector = connector(&["nats://seed.example:4222"], options());
+        let seed = addr("nats://seed.example:4222");
+        connector.add_discovered_servers(&["other.example.com:4222".into()], &seed, false);
+        connector.current = Some(CurrentServer {
+            addr: addr("nats://other.example.com:4222"),
+            security: Security::Plaintext,
+        });
+        // A pool that asks for TLS and does not list that host.
+        connector
+            .set_server_pool(vec![addr("tls://seed.example:4222")])
+            .unwrap();
+        assert!(connector.tls_asked_by.is_some());
+
+        // A later INFO on that connection lists an IP address.
+        connector.info_received(&ServerInfo {
+            connect_urls: vec!["203.0.113.5:4222".into()],
+            ..Default::default()
+        });
+
+        let ip = addr("nats://203.0.113.5:4222");
+        assert_eq!(connector.tls_name(&ip), None);
+        assert!(connector.skip_without_tls_name(&ip));
+    }
+
+    #[test]
+    fn a_server_that_drops_out_of_the_list_is_learned_again() {
+        let mut connector = connector(&["nats://seed.example:4222"], options());
+        let seed = addr("nats://seed.example:4222");
+
+        connector.replace_discovered_servers(
+            &["10.0.0.2:4222".into(), "10.0.0.3:4222".into()],
+            &seed,
+            true,
+        );
+        connector.replace_discovered_servers(&["10.0.0.3:4222".into()], &seed, false);
+        assert_eq!(
+            pool(&connector),
+            ["nats://seed.example:4222", "nats://10.0.0.3:4222"]
+        );
+
+        // Back in a list learned without TLS, it is a new entry without TLS; the server that
+        // stayed keeps what the client learned about it.
+        connector.replace_discovered_servers(
+            &["10.0.0.3:4222".into(), "10.0.0.2:4222".into()],
+            &seed,
+            false,
+        );
+        assert_eq!(
+            pool(&connector),
+            [
+                "nats://seed.example:4222",
+                "nats://10.0.0.3:4222",
+                "nats://10.0.0.2:4222"
+            ]
+        );
+        assert!(!connector.learned_over_tls(&addr("nats://10.0.0.2:4222")));
+        assert!(connector.learned_over_tls(&addr("nats://10.0.0.3:4222")));
+    }
+
     fn tls_name(connector: &Connector, url: &str) -> Option<String> {
         connector.tls_name(&addr(url)).map(str::to_owned)
     }
@@ -2132,18 +2298,67 @@ mod tests {
     fn the_error_without_a_name_names_the_settings_that_give_one() {
         assert_eq!(
             no_tls_name(&addr("nats://10.0.0.2:4222")),
-            "\"nats://10.0.0.2:4222\": a discovered server with no name to verify its certificate \
-             against; tls_server_name() sets the name to verify every server against, or \
+            "a discovered server with no name to verify its certificate against; \
+             tls_server_name() sets the name to verify every server against, or \
              verify_discovered_servers_by_ip() verifies a discovered IP address against \
              itself, which is safe only where the CA that issued the certificates is not \
              shared with others"
         );
         assert_eq!(
             no_tls_name(&addr("nats://node4.example.com:4222")),
-            "\"nats://node4.example.com:4222\": a discovered server with no name to verify its \
-             certificate against; tls_server_name() sets the name to verify every server \
-             against"
+            "a discovered server with no name to verify its certificate against; \
+             tls_server_name() sets the name to verify every server against"
         );
+    }
+
+    /// Log lines written while it runs.
+    fn logs_of(run: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Logs(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Logs {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let logs = Logs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, run);
+        let text = String::from_utf8_lossy(&logs.0.lock().unwrap()).into_owned();
+        text
+    }
+
+    #[test]
+    fn cuts_the_url_in_the_warning_for_a_skipped_server() {
+        // A host name learned without TLS while the client asks for TLS, as after a pool
+        // asked for TLS on a connection without it. The host is longer than the cut.
+        let mut connector = connector(
+            &["nats://seed.example:4222"],
+            ConnectorOptions {
+                tls_required: true,
+                ..options()
+            },
+        );
+        let url = format!("nats://{}:4222", "h".repeat(300));
+        connector.add_discovered_servers(
+            &[format!("{}:4222", "h".repeat(300))],
+            &addr("nats://seed.example:4222"),
+            false,
+        );
+
+        let mut skipped = false;
+        let logs = logs_of(|| skipped = connector.skip_without_tls_name(&addr(&url)));
+
+        assert!(skipped);
+        assert!(logs.contains(&quoted(&url)), "{logs}");
+        assert!(!logs.contains(&url), "{logs}");
     }
 
     #[test]

@@ -18,11 +18,11 @@
 mod info_handling {
     use std::{path::PathBuf, sync::Arc, time::Duration};
 
-    use async_nats::{ConnectErrorKind, ConnectOptions};
+    use async_nats::{ConnectErrorKind, ConnectOptions, ReconnectToServer};
     use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
     use serde_json::{json, Value};
     use tokio::{
-        io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+        io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
         net::{TcpListener, TcpStream},
         sync::{broadcast, mpsc},
     };
@@ -245,7 +245,7 @@ mod info_handling {
         ConnectOptions::new().add_root_certificates(certs("rootCA.pem"))
     }
 
-    /// An INFO that lists servers on 127.0.0.1 with `ports`. No test dials them.
+    /// An INFO that lists servers on 127.0.0.1 with `ports`. No test dials a fixed port such as 4001.
     fn listing(ports: &[u16]) -> Value {
         let urls: Vec<String> = ports
             .iter()
@@ -718,5 +718,298 @@ mod info_handling {
             .unwrap()
             .unwrap();
         assert_eq!(name, "inside-tls");
+    }
+
+    /// Waits until the client's pool lists `expected`, in this order.
+    async fn wait_for_pool(client: &async_nats::Client, expected: &[String]) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let pool = pool_urls(client).await;
+            if pool == expected {
+                return;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{pool:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Sends every reconnect to the pool entry with `port`.
+    fn steered_to(options: ConnectOptions, port: u16) -> ConnectOptions {
+        options.reconnect_to_server_callback(move |servers, _| {
+            let server = servers
+                .into_iter()
+                .find(|server| server.addr.port() == port);
+            async move {
+                server.map(|server| ReconnectToServer {
+                    addr: server.addr,
+                    delay: None,
+                })
+            }
+        })
+    }
+
+    // The servers of an INFO on the established connection replace the discovered servers;
+    // the configured servers stay. An INFO without servers, or with an empty list, changes
+    // nothing, and so does its connect_info.
+    #[tokio::test]
+    async fn an_info_on_the_established_connection_replaces_the_discovered_servers() {
+        let server = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(listing(&[4001, 4002]))],
+        )
+        .await;
+        let configured = [server.url(), "nats://127.0.0.1:4999".to_string()];
+        let client = test_ca()
+            .retain_servers_order()
+            .connect(configured.as_slice())
+            .await
+            .unwrap();
+        assert_eq!(
+            pool_urls(&client).await,
+            [&configured[..], &[listed(4001), listed(4002)]].concat()
+        );
+
+        server.send_info(listing(&[4002, 4003]));
+        let replaced = [&configured[..], &[listed(4002), listed(4003)]].concat();
+        wait_for_pool(&client, &replaced).await;
+
+        server.send_info(json!({}));
+        server.send_info(json!({ "connect_urls": [], "connect_info": true }));
+        server.send_info(json!({ "server_name": "after" }));
+        wait_for_server_name(&client, "after").await;
+        assert_eq!(pool_urls(&client).await, replaced);
+    }
+
+    // The server the client is connected to stays in the pool when the list it sends leaves
+    // it out.
+    #[tokio::test]
+    async fn keeps_the_server_it_is_connected_to() {
+        let peer = Server::start(Tls::None, json!({}), vec![Step::Line("PONG")]).await;
+        let seed = Server::start(Tls::None, listing(&[peer.port]), vec![Step::Line("PONG")]).await;
+        let client = steered_to(ConnectOptions::new(), peer.port)
+            .connect(seed.url())
+            .await
+            .unwrap();
+        client.force_reconnect().await.unwrap();
+        wait_for_server_name(&client, &format!("fake-{}", peer.port)).await;
+
+        peer.send_info(listing(&[4001]));
+
+        // Learned without TLS, both are listed as nats://.
+        let plain = [peer.port, 4001].map(|port| format!("nats://127.0.0.1:{port}"));
+        wait_for_pool(&client, &[&[seed.url()], &plain[..]].concat()).await;
+    }
+
+    // The INFO that follows the first PONG of a reconnect replaces the discovered servers
+    // too, as when it comes after the wait.
+    #[tokio::test]
+    async fn the_info_after_the_first_pong_of_a_reconnect_replaces_the_discovered_servers() {
+        let peer = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(listing(&[4002]))],
+        )
+        .await;
+        let seed = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(listing(&[peer.port, 4001]))],
+        )
+        .await;
+        let client = steered_to(test_ca(), peer.port)
+            .connect(seed.url())
+            .await
+            .unwrap();
+        assert_eq!(
+            pool_urls(&client).await,
+            [seed.url(), listed(peer.port), listed(4001)]
+        );
+
+        client.force_reconnect().await.unwrap();
+        wait_for_server_name(&client, &format!("fake-{}", peer.port)).await;
+
+        assert_eq!(
+            pool_urls(&client).await,
+            [seed.url(), listed(peer.port), listed(4002)]
+        );
+    }
+
+    // A server listed in an INFO on a connection with TLS is learned over TLS: the client
+    // connects to it with TLS, although nothing asks for TLS and its own INFO does not
+    // require it. The seed's version is before 2.12, so the INFO comes after the connect.
+    #[tokio::test]
+    async fn a_server_listed_on_a_connection_with_tls_is_connected_to_with_tls() {
+        let canary = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let canary_port = canary.local_addr().unwrap().port();
+        let seed = Server::start(
+            Tls::AfterInfo,
+            json!({ "version": "2.11.0" }),
+            vec![Step::Line("PONG")],
+        )
+        .await;
+        let client = steered_to(test_ca().tls_optional(), canary_port)
+            .connect(seed.url())
+            .await
+            .unwrap();
+
+        seed.send_info(json!({
+            "version": "2.11.0",
+            "connect_urls": [format!("127.0.0.1:{canary_port}")],
+        }));
+        wait_for_pool(&client, &[seed.url(), listed(canary_port)]).await;
+        client.force_reconnect().await.unwrap();
+
+        // Its INFO offers TLS without requiring it, like a server with `allow_non_tls`.
+        let (mut stream, _) = canary.accept().await.unwrap();
+        stream
+            .write_all(&info_line(canary_port, &json!({ "tls_available": true })))
+            .await
+            .unwrap();
+        let mut first = [0u8; 1];
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut first))
+            .await
+            .unwrap()
+            .unwrap();
+        // A TLS handshake record, not CONNECT.
+        assert_eq!(first, [0x16]);
+    }
+
+    // When the wait after the first PONG has timed out, the client takes the INFO that
+    // follows the PONG when it arrives.
+    #[tokio::test]
+    async fn takes_the_info_after_the_first_pong_when_it_comes_after_the_wait() {
+        let server = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![
+                Step::Line("PONG"),
+                Step::Pause(Duration::from_secs(3)),
+                Step::Info(listing(&[4001])),
+            ],
+        )
+        .await;
+
+        let client = test_ca()
+            .connection_timeout(Duration::from_secs(1))
+            .connect(server.url())
+            .await
+            .unwrap();
+        assert_eq!(pool_urls(&client).await, [server.url()]);
+
+        wait_for_pool(&client, &[server.url(), listed(4001)]).await;
+    }
+
+    // Under ignore_discovered_servers() the servers of a later INFO are not used either.
+    #[tokio::test]
+    async fn ignores_the_servers_of_later_infos_under_ignore_discovered_servers() {
+        let server = Server::start(Tls::AfterInfo, json!({}), vec![Step::Line("PONG")]).await;
+        let client = test_ca()
+            .ignore_discovered_servers()
+            .connect(server.url())
+            .await
+            .unwrap();
+
+        server.send_info(listing(&[4001]));
+        server.send_info(json!({ "server_name": "after" }));
+
+        wait_for_server_name(&client, "after").await;
+        assert_eq!(pool_urls(&client).await, [server.url()]);
+    }
+
+    // An IP address listed on a connection with TLS is verified against the name that
+    // connection was verified under, also after a pool that leaves out the server it is
+    // connected to. Here that server is a discovered IP address, verified against
+    // localhost, and it lists itself.
+    #[tokio::test]
+    async fn verifies_what_the_current_server_lists_after_a_pool_that_leaves_it_out() {
+        let peer = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(json!({}))],
+        )
+        .await;
+        let seed = Server::start(
+            Tls::AfterInfo,
+            json!({}),
+            vec![Step::Line("PONG"), Step::Info(listing(&[peer.port]))],
+        )
+        .await;
+        let client = steered_to(test_ca(), peer.port)
+            .connect(seed.url())
+            .await
+            .unwrap();
+        let peer_name = format!("fake-{}", peer.port);
+        client.force_reconnect().await.unwrap();
+        wait_for_server_name(&client, &peer_name).await;
+
+        client.set_server_pool(seed.url().as_str()).await.unwrap();
+        peer.send_info(json!({
+            "connect_urls": [format!("127.0.0.1:{}", peer.port)],
+            "server_name": "after-pool",
+        }));
+        wait_for_server_name(&client, "after-pool").await;
+        client.force_reconnect().await.unwrap();
+
+        wait_for_server_name(&client, &peer_name).await;
+    }
+
+    // So does an IP address listed on a connection with TLS to a server the client was
+    // connected to without TLS before: here a pool gives that server's tls:// URL.
+    #[tokio::test]
+    async fn verifies_what_a_server_lists_with_tls_after_a_connection_to_it_without_tls() {
+        let canary = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let canary_port = canary.local_addr().unwrap().port();
+        // One server: without TLS for the first connection, with TLS for the second.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (infos, _) = broadcast::channel(1);
+            let scripts = [
+                (Tls::None, vec![Step::Line("PONG")]),
+                (
+                    Tls::AfterInfo,
+                    vec![Step::Line("PONG"), Step::Info(listing(&[canary_port]))],
+                ),
+            ];
+            for (tls, script) in scripts {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (script_run, _) = mpsc::unbounded_channel();
+                tokio::spawn(serve(
+                    stream,
+                    port,
+                    tls,
+                    json!({}),
+                    script,
+                    script_run,
+                    infos.subscribe(),
+                ));
+            }
+        });
+        let client = steered_to(test_ca().tls_optional(), canary_port)
+            .connect(format!("nats://localhost:{port}"))
+            .await
+            .unwrap();
+        let tls_url = format!("tls://localhost:{port}");
+        client.set_server_pool(tls_url.as_str()).await.unwrap();
+        client.force_reconnect().await.unwrap();
+        wait_for_pool(&client, &[tls_url, listed(canary_port)]).await;
+        client.force_reconnect().await.unwrap();
+
+        let (mut stream, _) = tokio::time::timeout(Duration::from_secs(5), canary.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        stream
+            .write_all(&info_line(canary_port, &json!({ "tls_available": true })))
+            .await
+            .unwrap();
+        let mut first = [0u8; 1];
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut first))
+            .await
+            .unwrap()
+            .unwrap();
+        // A TLS handshake record, not CONNECT.
+        assert_eq!(first, [0x16]);
     }
 }
