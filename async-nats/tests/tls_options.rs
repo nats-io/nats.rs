@@ -108,8 +108,9 @@ mod tls_options {
     }
 
     /// A scripted server that requires TLS: it sends INFO with `tls_required`, upgrades
-    /// to TLS, and answers every PING with PONG. Dropping it closes the
-    /// listener and every connection.
+    /// to TLS, and answers every PING with PONG. Like nats-server 2.12 and later, it sends
+    /// the INFO again after the first PONG. Dropping it closes the listener and every
+    /// connection.
     struct FakeServer {
         port: u16,
         stop: CancellationToken,
@@ -155,13 +156,13 @@ mod tls_options {
         port: u16,
         info: Value,
     ) -> std::io::Result<()> {
-        stream
-            .write_all(&info_line(&server_info(port, info)))
-            .await?;
+        let info = info_line(&server_info(port, info));
+        stream.write_all(&info).await?;
         let mut stream = acceptor().accept(stream).await?;
 
         let mut buf = Vec::new();
         let mut chunk = [0u8; 4096];
+        let mut info_after_pong = Some(info);
         loop {
             let n = stream.read(&mut chunk).await?;
             if n == 0 {
@@ -171,6 +172,9 @@ mod tls_options {
             if buf.windows(6).any(|w| w == b"PING\r\n") {
                 buf.clear();
                 stream.write_all(b"PONG\r\n").await?;
+                if let Some(info) = info_after_pong.take() {
+                    stream.write_all(&info).await?;
+                }
             }
         }
     }

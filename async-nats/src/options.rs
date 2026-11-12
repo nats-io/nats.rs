@@ -761,7 +761,9 @@ impl ConnectOptions {
     /// Sets a timeout for the full connection establishment and handshake to avoid
     /// hangs and deadlocks. This includes TCP/WebSocket connection, TLS setup,
     /// waiting for the server INFO message, sending CONNECT/PING, and receiving
-    /// the initial server PONG response. Default is set to 5 seconds.
+    /// the initial server PONG response. On a connection that starts TLS after INFO, to
+    /// nats-server 2.12 or later, the client then waits up to this timeout once more for the
+    /// INFO that follows that PONG before it reports connected. Default is set to 5 seconds.
     ///
     /// # Examples
     /// ```no_run
@@ -1063,6 +1065,7 @@ impl ConnectOptions {
     /// By default, a server may advertise other servers in the cluster known to it.
     /// By setting this option, the client will ignore the advertised servers.
     /// This may be useful if the client may not be able to reach them.
+    /// The client then also does not wait for the INFO that follows the first PONG.
     pub fn ignore_discovered_servers(mut self) -> ConnectOptions {
         self.ignore_discovered_servers = true;
         self
