@@ -761,6 +761,9 @@ mod discovered_servers {
             .connect(format!("tls://localhost:{}", seed.port))
             .await
             .unwrap();
+        assert!(pool_urls(&client)
+            .await
+            .contains(&format!("tls://127.0.0.1:{}", second.port)));
 
         steer.to(second.port);
         client.force_reconnect().await.unwrap();

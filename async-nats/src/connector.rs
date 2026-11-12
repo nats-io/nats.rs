@@ -1253,10 +1253,10 @@ impl Connector {
             }
             connection = tls_connection(connection).await?;
             tls = true;
-        };
-
-        // Discover servers from INFO.
-        if !self.options.ignore_discovered_servers {
+        } else if !self.options.ignore_discovered_servers {
+            // Discover servers from INFO. The servers of an INFO read before a TLS handshake
+            // are not used, whether the attempt goes on or fails: they come from the INFOs
+            // received inside TLS.
             self.add_discovered_servers(&info.connect_urls, &server_addr, tls);
         }
 
