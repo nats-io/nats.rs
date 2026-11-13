@@ -55,6 +55,14 @@ graph, enabling `chrono` *anywhere* in the graph selects it for every consumer o
 in that build — so an unexpected `time` vs `chrono` type mismatch usually means a dependency
 enabled `async-nats/chrono`.
 
+#### TLS
+
+The client asks for TLS when any of these is set: `require_tls(true)`, `tls_first()`, a `tls://` or
+`wss://` server URL, root certificates, a client certificate, a rustls client config,
+`tls_server_name()` or `verify_discovered_servers_by_ip()`. Every server is then connected to with
+TLS, servers discovered from the cluster and reconnects included, and a `ws://` URL is refused.
+`tls_optional()` opts out and leaves TLS to each server. See [`ConnectOptions`](https://docs.rs/async-nats/latest/async_nats/struct.ConnectOptions.html).
+
 ---
 
 #### Client and Orbit
