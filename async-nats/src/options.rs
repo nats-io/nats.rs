@@ -30,6 +30,28 @@ use tokio::io;
 use tokio_rustls::rustls;
 
 /// Connect options. Used to connect with NATS when custom config is needed.
+///
+/// # TLS
+///
+/// The client asks for TLS when any of these is set:
+/// [`require_tls(true)`](ConnectOptions::require_tls), [`tls_first()`](ConnectOptions::tls_first),
+/// a `tls://` or `wss://` server URL, also one given to
+/// [`Client::set_server_pool`](crate::Client::set_server_pool),
+/// [`add_root_certificates()`](ConnectOptions::add_root_certificates),
+/// [`add_client_certificate()`](ConnectOptions::add_client_certificate),
+/// [`tls_client_config()`](ConnectOptions::tls_client_config),
+/// [`tls_server_name()`](ConnectOptions::tls_server_name) or
+/// [`verify_discovered_servers_by_ip()`](ConnectOptions::verify_discovered_servers_by_ip).
+/// Every server is then connected to with TLS, servers discovered from the cluster and
+/// reconnects included, and a `ws://` URL is refused as a configuration error.
+/// [`tls_optional()`](ConnectOptions::tls_optional) opts out and leaves TLS to each server.
+///
+/// [`tls_server_name()`](ConnectOptions::tls_server_name) sets the name every server's
+/// certificate is verified against.
+/// [`verify_discovered_servers_by_ip()`](ConnectOptions::verify_discovered_servers_by_ip)
+/// verifies a discovered IP address against itself, for clusters whose certificates carry only
+/// IP addresses and whose CA is not shared with others.
+///
 /// # Examples
 /// ```no_run
 /// # #[tokio::main]
