@@ -421,13 +421,7 @@ impl Client {
             .map(|m| m.as_str().parse::<i64>().unwrap())
             .unwrap();
 
-        if server_major < major
-            || (server_major == major && server_minor < minor)
-            || (server_major == major && server_minor == minor && server_patch < patch)
-        {
-            return false;
-        }
-        true
+        (server_major, server_minor, server_patch) >= (major, minor, patch)
     }
 
     /// Publish a [Message] to a given subject.
