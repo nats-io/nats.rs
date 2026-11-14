@@ -163,6 +163,40 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn force_reconnect_keeps_publish_acks_in_flight() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client.clone());
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "RECONNECT".into(),
+                subjects: vec!["reconnect".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut acks = Vec::new();
+        for i in 0..500 {
+            if i == 250 {
+                client.force_reconnect().await.unwrap();
+            }
+            acks.push(
+                context
+                    .publish("reconnect", i.to_string().into())
+                    .await
+                    .unwrap(),
+            );
+        }
+        for (i, ack) in acks.into_iter().enumerate() {
+            let ack = ack.await.unwrap_or_else(|err| panic!("ack {i}: {err}"));
+            assert_eq!(ack.sequence, i as u64 + 1);
+        }
+        assert_eq!(stream.info().await.unwrap().state.messages, 500);
+    }
+
+    #[tokio::test]
     async fn send_publish() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();

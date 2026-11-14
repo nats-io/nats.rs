@@ -198,4 +198,54 @@ mod client {
 
         assert!(client.server_info().tls_required);
     }
+
+    #[tokio::test]
+    async fn tls_force_reconnect_delivers_reply_to_request_in_flight() {
+        let server = nats_server::run_server("tests/configs/tls.conf");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let options = || {
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-cert.pem"),
+                    path.join("tests/configs/certs/client-key.pem"),
+                )
+                .require_tls(true)
+        };
+
+        let responder = options().connect(server.client_url()).await.unwrap();
+        let mut requests = responder.subscribe("slow").await.unwrap();
+        responder.flush().await.unwrap();
+        let (received_tx, mut received_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::task::spawn(async move {
+            while let Some(request) = requests.next().await {
+                received_tx.send(()).ok();
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                responder
+                    .publish(request.reply.unwrap(), "reply".into())
+                    .await
+                    .unwrap();
+                responder.flush().await.unwrap();
+            }
+        });
+
+        // Reconnecting takes longer than the reply, so a reply the old connection does not wait
+        // for reaches the server while this client is not connected, and is lost.
+        let client = options()
+            .reconnect_delay_callback(|_| Duration::from_millis(500))
+            .request_timeout(Some(Duration::from_secs(3)))
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let request = tokio::task::spawn({
+            let client = client.clone();
+            async move { client.request("slow", "data".into()).await }
+        });
+        received_rx.recv().await.unwrap();
+        client.force_reconnect().await.unwrap();
+
+        let reply = request.await.unwrap().unwrap();
+        assert_eq!(reply.payload, "reply");
+    }
 }

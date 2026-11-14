@@ -78,6 +78,191 @@ mod client {
             .unwrap();
     }
 
+    /// Subscribes `client` to `subject` and answers each request after `delay`. Each request is
+    /// reported on the returned channel as it arrives, before it is answered. A `None` delay
+    /// never answers.
+    async fn delayed_responder(
+        client: async_nats::Client,
+        subject: &'static str,
+        delay: Option<Duration>,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<()> {
+        let (received_tx, received_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut requests = client.subscribe(subject).await.unwrap();
+        client.flush().await.unwrap();
+        tokio::task::spawn(async move {
+            while let Some(request) = requests.next().await {
+                received_tx.send(()).ok();
+                if let Some(delay) = delay {
+                    tokio::time::sleep(delay).await;
+                    client
+                        .publish(request.reply.unwrap(), "reply".into())
+                        .await
+                        .unwrap();
+                    client.flush().await.unwrap();
+                }
+            }
+        });
+        received_rx
+    }
+
+    #[tokio::test]
+    async fn force_reconnect_delivers_reply_to_request_in_flight() {
+        let server = nats_server::run_basic_server();
+        let responder = async_nats::connect(server.client_url()).await.unwrap();
+        let mut received =
+            delayed_responder(responder, "slow", Some(Duration::from_millis(300))).await;
+
+        // Reconnecting takes longer than the reply, so a reply the old connection does not wait
+        // for reaches the server while this client is not connected, and is lost.
+        let client = ConnectOptions::new()
+            .reconnect_delay_callback(|_| Duration::from_millis(500))
+            .request_timeout(Some(Duration::from_secs(3)))
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let request = tokio::task::spawn({
+            let client = client.clone();
+            async move { client.request("slow", "data".into()).await }
+        });
+        received.recv().await.unwrap();
+        client.force_reconnect().await.unwrap();
+
+        let reply = request.await.unwrap().unwrap();
+        assert_eq!(reply.payload, "reply");
+    }
+
+    #[tokio::test]
+    async fn force_reconnect_waits_for_unanswered_request_up_to_bound() {
+        let server = nats_server::run_basic_server();
+        let silent = async_nats::connect(server.client_url()).await.unwrap();
+        let mut received = delayed_responder(silent, "silent", None).await;
+
+        let (connected_tx, mut connected_rx) = tokio::sync::mpsc::unbounded_channel();
+        let client = ConnectOptions::new()
+            .event_callback(move |event| {
+                let connected_tx = connected_tx.clone();
+                async move {
+                    if let Event::Connected = event {
+                        connected_tx.send(()).ok();
+                    }
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        // initial connect event.
+        connected_rx.recv().await.unwrap();
+
+        let _request = tokio::task::spawn({
+            let client = client.clone();
+            async move { client.request("silent", "data".into()).await }
+        });
+        received.recv().await.unwrap();
+
+        let start = Instant::now();
+        client.force_reconnect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), connected_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(900),
+            "reconnected after {elapsed:?}, before the request's bound"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "reconnected after {elapsed:?}, well past the request's bound"
+        );
+    }
+
+    #[tokio::test]
+    async fn force_reconnect_does_not_wait_for_abandoned_request() {
+        let server = nats_server::run_basic_server();
+        let silent = async_nats::connect(server.client_url()).await.unwrap();
+        let mut received = delayed_responder(silent, "silent", None).await;
+
+        let (connected_tx, mut connected_rx) = tokio::sync::mpsc::unbounded_channel();
+        let client = ConnectOptions::new()
+            .event_callback(move |event| {
+                let connected_tx = connected_tx.clone();
+                async move {
+                    if let Event::Connected = event {
+                        connected_tx.send(()).ok();
+                    }
+                }
+            })
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        // initial connect event.
+        connected_rx.recv().await.unwrap();
+
+        // The caller gives up on the request before the reconnect.
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            client.request("silent", "data".into()),
+        )
+        .await
+        .unwrap_err();
+        received.recv().await.unwrap();
+
+        let start = Instant::now();
+        client.force_reconnect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), connected_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "reconnected after {elapsed:?}, waiting for a request nobody awaits"
+        );
+    }
+
+    #[tokio::test]
+    async fn force_reconnect_holds_later_commands_for_new_connection() {
+        const COUNT: usize = 64;
+
+        let server = nats_server::run_basic_server();
+        let subscriber = async_nats::connect(server.client_url()).await.unwrap();
+        let mut sub = subscriber.subscribe("after").await.unwrap();
+        subscriber.flush().await.unwrap();
+
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        // On this single-threaded runtime none of these sends yields, so the reconnect and every
+        // command after it are in the channel before the connection handler runs. The handler
+        // takes them in chunks; once it has taken the reconnect it takes no further chunk, so
+        // the flush waits for the new connection.
+        client.force_reconnect().await.unwrap();
+        for i in 0..COUNT {
+            client.publish("after", i.to_string().into()).await.unwrap();
+        }
+        client.flush().await.unwrap();
+        assert_eq!(
+            client.statistics().connects.load(Ordering::Relaxed),
+            2,
+            "the flush issued after the reconnect completed on the old connection"
+        );
+
+        for i in 0..COUNT {
+            let message = tokio::time::timeout(Duration::from_secs(5), sub.next())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(message.payload, i.to_string(), "publishes out of order");
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), sub.next())
+                .await
+                .is_err(),
+            "a publish was delivered more than once"
+        );
+    }
+
     #[tokio::test]
     async fn basic_pub_sub() {
         let server = nats_server::run_basic_server();

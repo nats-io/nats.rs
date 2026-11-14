@@ -218,7 +218,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::ErrorKind;
-use tokio::time::{interval, Duration, Interval, MissedTickBehavior};
+use tokio::time::{interval, Duration, Instant, Interval, MissedTickBehavior};
 use url::{Host, Url};
 
 use bytes::Bytes;
@@ -457,6 +457,14 @@ struct Multiplexer {
     senders: HashMap<String, oneshot::Sender<Message>>,
 }
 
+/// Bounds how long a requested reconnect spends writing out the commands already taken.
+const RECONNECT_WRITE_OUT: Duration = Duration::from_millis(200);
+/// Bounds how long a requested reconnect keeps reading while a request awaits its reply.
+const RECONNECT_DRAIN: Duration = Duration::from_secs(1);
+/// Bounds how long a requested reconnect spends closing: shutting the write side, then
+/// reading until the server closes the connection.
+const RECONNECT_POLITE_CLOSE: Duration = Duration::from_millis(200);
+
 /// A connection handler which facilitates communication from channels to a single shared connection.
 pub(crate) struct ConnectionHandler {
     connection: Connection,
@@ -495,6 +503,17 @@ impl ConnectionHandler {
             is_draining: false,
             drain_pings: VecDeque::new(),
         }
+    }
+
+    /// The requests whose reply has not arrived and whose caller still waits for it.
+    fn open_requests(&self) -> usize {
+        self.multiplexer.as_ref().map_or(0, |multiplexer| {
+            multiplexer
+                .senders
+                .values()
+                .filter(|sender| !sender.is_closed())
+                .count()
+        })
     }
 
     pub(crate) async fn process<'a>(&'a mut self, receiver: &'a mut mpsc::Receiver<Command>) {
@@ -597,7 +616,11 @@ impl ConnectionHandler {
 
                 let mut made_progress = true;
                 loop {
-                    while !self.handler.connection.is_write_buf_full() {
+                    // Once a reconnect is requested no further command is taken: what is still in
+                    // the channel goes out on the next connection.
+                    while !self.handler.connection.is_write_buf_full()
+                        && !self.handler.should_reconnect
+                    {
                         debug_assert!(self.recv_buf.is_empty());
 
                         let Self {
@@ -695,14 +718,77 @@ impl ConnectionHandler {
                 }
                 ExitReason::ReconnectRequested => {
                     debug!("reconnect requested");
-                    // Should be ok to ingore error, as that means we are not in connected state.
-                    self.connection.stream.shutdown().await.ok();
+                    self.close_for_reconnect().await;
                     if self.handle_disconnect().await.is_err() {
                         break;
                     };
                 }
             }
         }
+    }
+
+    /// Ends the current connection for a requested reconnect without dropping what the server
+    /// sent on it: writes out the commands already taken, keeps reading while a request still
+    /// awaits its reply, then shuts the write side and reads until the server closes.
+    ///
+    /// Every operation read here goes through [`Self::handle_server_op`], so a reply reaches its
+    /// caller and a message its subscription. A `PONG` or `UNSUB` that it queues is not written:
+    /// before the write side is shut it is owed for at most [`RECONNECT_DRAIN`], after it nothing
+    /// can be sent, and the write buffer goes with the connection. Nothing is ever sent twice.
+    ///
+    /// Each step is bounded and starts when the previous one ends, so this returns within
+    /// `RECONNECT_WRITE_OUT + RECONNECT_DRAIN + RECONNECT_POLITE_CLOSE`.
+    async fn close_for_reconnect(&mut self) {
+        // An error or the bound ends the write out; neither stops the reconnect.
+        let write_out = std::future::poll_fn(|cx| match self.connection.poll_write(cx) {
+            Poll::Ready(Ok(())) => self.connection.poll_flush(cx),
+            other => other,
+        });
+        let _ = tokio::time::timeout(RECONNECT_WRITE_OUT, write_out).await;
+
+        let open_at_start = self.open_requests();
+        let drain_deadline = Instant::now() + RECONNECT_DRAIN;
+        let mut drain_ops: u64 = 0;
+        // The deadline is checked before each read as well: a timeout polls the read first, so a
+        // peer that never stops sending would otherwise hold either loop past its bound.
+        while self.open_requests() > 0 && Instant::now() < drain_deadline {
+            let read = std::future::poll_fn(|cx| self.connection.poll_read_op(cx));
+            match tokio::time::timeout_at(drain_deadline, read).await {
+                Ok(Ok(Some(server_op))) => {
+                    drain_ops += 1;
+                    self.handle_server_op(server_op);
+                }
+                // The server closed, the read failed, or the bound passed.
+                Ok(Ok(None)) | Ok(Err(_)) | Err(_) => break,
+            }
+        }
+        let open_at_end = self.open_requests();
+
+        // The bound covers the shutdown too: over TLS it writes a close notification, which can
+        // wait on a peer that is not reading. An error means the connection is already gone.
+        let close_deadline = Instant::now() + RECONNECT_POLITE_CLOSE;
+        let _ = tokio::time::timeout_at(close_deadline, self.connection.stream.shutdown()).await;
+        let mut close_ops: u64 = 0;
+        let close_ended = loop {
+            if Instant::now() >= close_deadline {
+                break "bound";
+            }
+            let read = std::future::poll_fn(|cx| self.connection.poll_read_op(cx));
+            match tokio::time::timeout_at(close_deadline, read).await {
+                Ok(Ok(Some(server_op))) => {
+                    close_ops += 1;
+                    self.handle_server_op(server_op);
+                }
+                Ok(Ok(None)) => break "server closed",
+                Ok(Err(_)) => break "read error",
+                Err(_) => break "bound",
+            }
+        };
+
+        debug!(
+            open_at_start,
+            open_at_end, drain_ops, close_ops, close_ended, "closed the connection to reconnect"
+        );
     }
 
     fn handle_server_op(&mut self, server_op: ServerOp) {
@@ -979,6 +1065,8 @@ impl ConnectionHandler {
     }
 
     async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
+        // A connection about to be replaced has done what a pending reconnect request asked for.
+        self.should_reconnect = false;
         self.pending_pings = 0;
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
