@@ -46,6 +46,7 @@ portable-atomic = "1"
 # `Connector::Rustls` in connector.rs), so no root store is needed here. `sha1_smol` computes the
 # RFC 6455 handshake digest; under `fips` aws-lc computes it instead (see the `fips` feature).
 tokio-websockets = { version = "0.13.3", default-features = false, features = ["client", "rand", "rustls-bring-your-own-connector", "sha1_smol"], optional = true }
+http = { version = "1", default-features = false, features = ["std"], optional = true }
 pin-project = "1.0"
 
 [dev-dependencies]
@@ -79,7 +80,7 @@ service = ["dep:time", "dep:serde_nanos"]
 # than rebinding this one.
 chrono = ["dep:chrono"]
 crypto = []
-websockets = ["dep:tokio-websockets"]
+websockets = ["dep:tokio-websockets", "dep:http"]
 aws-lc-rs = ["dep:aws-lc-rs", "tokio-rustls/aws-lc-rs", "rustls-webpki/aws-lc-rs"]
 ring = ["dep:ring", "tokio-rustls/ring"]
 # Forward `aws_lc_rs` so the websocket handshake SHA-1 stays in the aws-lc FIPS module;

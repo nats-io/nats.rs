@@ -241,6 +241,13 @@ pub(crate) const DEFAULT_SERVER_MAX_PAYLOAD: usize = 1024 * 1024;
 /// must be provided using `Options::tls_client_config`.
 pub use tokio_rustls::rustls;
 
+/// A re-export of the `http` crate used for configuring custom HTTP headers
+/// on WebSocket handshake requests via [`ConnectOptions::websocket_headers`]
+/// and [`ConnectOptions::websocket_headers_callback`].
+#[cfg(feature = "websockets")]
+#[cfg_attr(docsrs, doc(cfg(feature = "websockets")))]
+pub use http;
+
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use connector::{ReconnectToServer, Server};
@@ -1068,6 +1075,10 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             max_reconnects: options.max_reconnects,
             local_address: options.local_address,
             reconnect_to_server_callback: options.reconnect_to_server_callback,
+            #[cfg(feature = "websockets")]
+            websocket_headers: options.websocket_headers,
+            #[cfg(feature = "websockets")]
+            websocket_headers_callback: options.websocket_headers_callback,
         },
         events_tx,
         state_tx,

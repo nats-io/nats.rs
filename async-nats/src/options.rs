@@ -70,12 +70,17 @@ pub struct ConnectOptions {
     pub(crate) skip_subject_validation: bool,
     pub(crate) local_address: Option<SocketAddr>,
     pub(crate) reconnect_to_server_callback: Option<ReconnectToServerCallback>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers: Option<http::HeaderMap>,
+    #[cfg(feature = "websockets")]
+    pub(crate) websocket_headers_callback:
+        Option<CallbackArg1<(), Result<http::HeaderMap, AuthError>>>,
 }
 
 impl fmt::Debug for ConnectOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entry(&"name", &self.name)
+        let mut map = f.debug_map();
+        map.entry(&"name", &self.name)
             .entry(&"no_echo", &self.no_echo)
             .entry(&"max_reconnects", &self.max_reconnects)
             .entry(&"connection_timeout", &self.connection_timeout)
@@ -90,8 +95,19 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"inbox_prefix", &self.inbox_prefix)
             .entry(&"retry_on_initial_connect", &self.retry_on_initial_connect)
             .entry(&"read_buffer_capacity", &self.read_buffer_capacity)
-            .entry(&"skip_subject_validation", &self.skip_subject_validation)
-            .finish()
+            .entry(&"skip_subject_validation", &self.skip_subject_validation);
+        #[cfg(feature = "websockets")]
+        {
+            let redacted_headers = self
+                .websocket_headers
+                .as_ref()
+                .map(|headers| format!("<{} headers>", headers.len()));
+            map.entry(&"websocket_headers", &redacted_headers).entry(
+                &"websocket_headers_callback",
+                &self.websocket_headers_callback,
+            );
+        }
+        map.finish()
     }
 }
 
@@ -126,6 +142,10 @@ impl Default for ConnectOptions {
             skip_subject_validation: false,
             local_address: None,
             reconnect_to_server_callback: None,
+            #[cfg(feature = "websockets")]
+            websocket_headers: None,
+            #[cfg(feature = "websockets")]
+            websocket_headers_callback: None,
         }
     }
 }
@@ -1045,6 +1065,90 @@ impl ConnectOptions {
         self.local_address = Some(address);
         self
     }
+
+    /// Sets custom HTTP headers to include in the WebSocket handshake request when
+    /// connecting over `ws://` or `wss://`.
+    ///
+    /// Note that this accepts [`http::HeaderMap`] (re-exported as [`async_nats::http::HeaderMap`][crate::http::HeaderMap]),
+    /// which is distinct from [`async_nats::HeaderMap`][crate::HeaderMap] used for NATS message headers.
+    ///
+    /// WebSocket handshake headers are single-value per header name. If multiple values
+    /// are inserted into the [`http::HeaderMap`] for the same header name, only the last
+    /// value is sent.
+    ///
+    /// This option is mutually exclusive with [`ConnectOptions::websocket_headers_callback`];
+    /// setting static headers clears any previously configured callback.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// use async_nats::http::{HeaderMap, HeaderValue};
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// headers.insert("x-custom-header", HeaderValue::from_static("custom-value"));
+    ///
+    /// async_nats::ConnectOptions::new()
+    ///     .websocket_headers(headers)
+    ///     .connect("ws://demo.nats.io:8443")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "websockets")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "websockets")))]
+    pub fn websocket_headers(mut self, headers: http::HeaderMap) -> ConnectOptions {
+        self.websocket_headers = Some(headers);
+        self.websocket_headers_callback = None;
+        self
+    }
+
+    /// Registers an asynchronous callback that produces HTTP headers to include in
+    /// each WebSocket handshake request when connecting or reconnecting over `ws://` or `wss://`.
+    ///
+    /// The callback is invoked on every WebSocket connection and reconnection attempt,
+    /// allowing dynamic or short-lived credentials (such as rotating bearer tokens or
+    /// session cookies) to be refreshed before each handshake.
+    ///
+    /// Note that the callback returns [`http::HeaderMap`] (re-exported as
+    /// [`async_nats::http::HeaderMap`][crate::http::HeaderMap]), which is distinct from
+    /// [`async_nats::HeaderMap`][crate::HeaderMap] used for NATS message headers.
+    ///
+    /// WebSocket handshake headers are single-value per header name. If multiple values
+    /// are inserted into the [`http::HeaderMap`] for the same header name, only the last
+    /// value is sent.
+    ///
+    /// This option is mutually exclusive with [`ConnectOptions::websocket_headers`];
+    /// setting a callback clears any previously configured static headers.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// use async_nats::http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
+    ///
+    /// async_nats::ConnectOptions::new()
+    ///     .websocket_headers_callback(|| async move {
+    ///         let mut headers = HeaderMap::new();
+    ///         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer my-token"));
+    ///         Ok(headers)
+    ///     })
+    ///     .connect("ws://demo.nats.io:8443")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "websockets")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "websockets")))]
+    pub fn websocket_headers_callback<F, Fut>(mut self, cb: F) -> ConnectOptions
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<http::HeaderMap, AuthError>> + Send + Sync + 'static,
+    {
+        self.websocket_headers = None;
+        self.websocket_headers_callback = Some(CallbackArg1(Arc::new(move |()| Box::pin(cb()))));
+        self
+    }
 }
 
 pub(crate) type AsyncCallbackArg1<A, T> =
@@ -1089,3 +1193,46 @@ impl std::fmt::Debug for AuthError {
 }
 
 impl std::error::Error for AuthError {}
+
+#[cfg(all(test, feature = "websockets"))]
+mod tests {
+    use super::*;
+    use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
+
+    #[test]
+    fn websocket_headers_default_is_none() {
+        let options = ConnectOptions::new();
+        assert!(options.websocket_headers.is_none());
+        assert!(options.websocket_headers_callback.is_none());
+    }
+
+    #[test]
+    fn websocket_headers_and_callback_are_mutually_exclusive() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+
+        let options = ConnectOptions::new()
+            .websocket_headers(headers.clone())
+            .websocket_headers_callback(|| async { Ok(HeaderMap::new()) });
+        assert!(options.websocket_headers.is_none());
+        assert!(options.websocket_headers_callback.is_some());
+
+        let options = options.websocket_headers(headers);
+        assert!(options.websocket_headers.is_some());
+        assert!(options.websocket_headers_callback.is_none());
+    }
+
+    #[test]
+    fn debug_redacts_websocket_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer super-secret-token"),
+        );
+
+        let options = ConnectOptions::new().websocket_headers(headers);
+        let debug_output = format!("{options:?}");
+        assert!(debug_output.contains("<1 headers>"));
+        assert!(!debug_output.contains("super-secret-token"));
+    }
+}
