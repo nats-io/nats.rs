@@ -2014,4 +2014,57 @@ mod client {
         // under test.
         drop(subscription);
     }
+
+    // Regression test for https://github.com/nats-io/nats.rs/issues/1623.
+    #[tokio::test]
+    async fn connect_uses_credentials_from_the_url() {
+        // Answers one handshake and hands back the CONNECT payload the client sent.
+        async fn sent_connect(userinfo: &str, options: ConnectOptions) -> serde_json::Value {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (connect_tx, connect_rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(async move {
+                let (stream, _peer) = listener.accept().await.unwrap();
+                let mut stream = tokio::io::BufReader::new(stream);
+                let info = format!("INFO {{\"server_id\":\"test\",\"server_name\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"host\":\"127.0.0.1\",\"port\":{port},\"max_payload\":1048576,\"auth_required\":true}}\r\n");
+                stream.get_mut().write_all(info.as_bytes()).await.unwrap();
+                let mut connect = String::new();
+                stream.read_line(&mut connect).await.unwrap();
+                let mut ping = String::new();
+                stream.read_line(&mut ping).await.unwrap();
+                assert_eq!(ping, "PING\r\n");
+                stream.get_mut().write_all(b"PONG\r\n").await.unwrap();
+                connect_tx.send(connect).unwrap();
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            });
+
+            let client = options
+                .connect(format!("nats://{userinfo}127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            let connect = connect_rx.await.unwrap();
+            drop(client);
+            handle.abort();
+
+            let payload = connect.strip_prefix("CONNECT ").unwrap().trim_end();
+            serde_json::from_str(payload).unwrap()
+        }
+
+        let connect = sent_connect("alice:p%40ss@", ConnectOptions::new()).await;
+        assert_eq!(connect["user"], "alice");
+        assert_eq!(connect["pass"], "p@ss");
+        assert!(connect["auth_token"].is_null());
+
+        let connect = sent_connect("s3cr3t@", ConnectOptions::new()).await;
+        assert_eq!(connect["auth_token"], "s3cr3t");
+        assert!(connect["user"].is_null());
+        assert!(connect["pass"].is_null());
+
+        // The URL wins over credentials set through the options.
+        let options = ConnectOptions::with_user_and_password("bob".into(), "other".into());
+        let connect = sent_connect("s3cr3t@", options).await;
+        assert_eq!(connect["auth_token"], "s3cr3t");
+        assert!(connect["user"].is_null());
+        assert!(connect["pass"].is_null());
+    }
 }
