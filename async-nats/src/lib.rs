@@ -315,6 +315,9 @@ pub struct ServerInfo {
     /// If this is set, then the server must authenticate using TLS.
     #[serde(default)]
     pub tls_required: bool,
+    /// If this is set, then the server offers TLS without requiring it.
+    #[serde(default)]
+    pub tls_available: bool,
     /// Maximum payload size that the server will accept.
     #[serde(default)]
     pub max_payload: usize,
@@ -411,7 +414,7 @@ pub(crate) enum Command {
     Reconnect,
     SetServerPool {
         servers: Vec<ServerAddr>,
-        result: oneshot::Sender<Result<(), String>>,
+        result: oneshot::Sender<Result<(), SetServerPoolError>>,
     },
     ServerPool {
         result: oneshot::Sender<Vec<connector::Server>>,
@@ -1056,6 +1059,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
             client_cert: options.client_cert,
             tls_client_config: options.tls_client_config,
             tls_first: options.tls_first,
+            tls_optional: options.tls_optional,
             auth: options.auth,
             no_echo: options.no_echo,
             connection_timeout: options.connection_timeout,
@@ -1073,8 +1077,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
         state_tx,
         max_payload.clone(),
         statistics.clone(),
-    )
-    .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?;
+    )?;
 
     let mut info = None;
     let mut connection = None;
@@ -1239,12 +1242,16 @@ pub enum ConnectErrorKind {
     AuthorizationViolation,
     /// Connect timed out.
     TimedOut,
-    /// Erroneous TLS setup.
+    /// Erroneous TLS setup, or a server that does not offer TLS while a setting asks for it.
     Tls,
     /// Other IO error.
     Io,
     /// Reached the maximum number of reconnects.
     MaxReconnects,
+    /// Options that cannot be combined, or a server URL this build or the client's
+    /// settings cannot connect to. Returned before any connection attempt, also with
+    /// [`ConnectOptions::retry_on_initial_connect`], and never retried.
+    Configuration,
 }
 
 impl Display for ConnectErrorKind {
@@ -1258,6 +1265,7 @@ impl Display for ConnectErrorKind {
             Self::Tls => write!(f, "TLS error"),
             Self::Io => write!(f, "IO error"),
             Self::MaxReconnects => write!(f, "reached maximum number of reconnects"),
+            Self::Configuration => write!(f, "configuration error"),
         }
     }
 }
@@ -1956,6 +1964,17 @@ mod tests {
     fn server_address_ipv4() {
         let address = ServerAddr::from_str("nats://127.0.0.1").unwrap();
         assert_eq!(address.host(), "127.0.0.1")
+    }
+
+    #[test]
+    fn server_address_scheme_is_compared_without_case() {
+        let address = ServerAddr::from_str("TLS://localhost:4222").unwrap();
+        assert_eq!(address.scheme(), "tls");
+        assert!(address.tls_required());
+
+        let address = ServerAddr::from_str("WSS://localhost:8443").unwrap();
+        assert_eq!(address.scheme(), "wss");
+        assert!(address.is_websocket());
     }
 
     #[test]

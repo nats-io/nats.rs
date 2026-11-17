@@ -968,6 +968,18 @@ impl Client {
     /// progress toward [`ConnectOptions::max_reconnects`](crate::ConnectOptions::max_reconnects)
     /// is cleared.
     ///
+    /// A `tls://` or `wss://` URL in the pool makes the client ask for TLS, as the same URL
+    /// does at connect: from the next attempt on, every server is dialed with TLS, the
+    /// other URLs of the pool and the servers discovered from the cluster included. The
+    /// current connection is not closed. A later pool without such a URL does not turn TLS
+    /// off. With [`ConnectOptions::tls_optional`](crate::ConnectOptions::tls_optional) set,
+    /// such a URL gets TLS for itself only, as at connect.
+    ///
+    /// The pool is checked as the server list at connect is. When the client asks for TLS,
+    /// or would with the new pool, a `ws://` URL is refused with
+    /// [`SetServerPoolErrorKind::Configuration`]; the pool and whether the client asks for
+    /// TLS are left as they were.
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -1007,9 +1019,6 @@ impl Client {
 
         rx.await
             .map_err(|err| SetServerPoolError::with_source(SetServerPoolErrorKind::Send, err))?
-            .map_err(|err| {
-                SetServerPoolError::with_source(SetServerPoolErrorKind::MixedSchemes, err)
-            })
     }
 
     /// Returns a snapshot of the current server pool.
@@ -1189,6 +1198,10 @@ pub enum SetServerPoolErrorKind {
     MixedSchemes,
     /// The server pool cannot be empty.
     EmptyPool,
+    /// The pool holds a server URL this build or the client's settings cannot connect
+    /// to, as [`ConnectErrorKind::Configuration`](crate::ConnectErrorKind::Configuration)
+    /// would refuse it at connect. The pool is unchanged.
+    Configuration,
 }
 
 impl Display for SetServerPoolErrorKind {
@@ -1201,6 +1214,7 @@ impl Display for SetServerPoolErrorKind {
                 f,
                 "cannot mix websocket and non-websocket URLs in server pool"
             ),
+            Self::Configuration => write!(f, "configuration error"),
         }
     }
 }

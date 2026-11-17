@@ -13,6 +13,8 @@
 
 use crate::auth::Auth;
 use crate::client::Statistics;
+#[cfg(feature = "websockets")]
+use crate::connection::AsyncReadWrite;
 use crate::connection::Connection;
 use crate::connection::State;
 #[cfg(feature = "websockets")]
@@ -31,6 +33,8 @@ use crate::ServerAddr;
 use crate::ServerError;
 use crate::ServerInfo;
 use crate::ServerOp;
+use crate::SetServerPoolError;
+use crate::SetServerPoolErrorKind;
 use crate::SocketAddr;
 use crate::ToServerAddrs;
 use crate::LANG;
@@ -41,14 +45,15 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::engine::Engine;
 use rand::rng;
 use rand::seq::SliceRandom;
+use std::borrow::Cow;
 use std::cmp;
 use std::fmt;
-use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::time::sleep;
 use tokio_rustls::rustls;
@@ -142,6 +147,7 @@ pub(crate) struct ConnectorOptions {
     pub(crate) client_key: Option<PathBuf>,
     pub(crate) tls_client_config: Option<rustls::ClientConfig>,
     pub(crate) tls_first: bool,
+    pub(crate) tls_optional: bool,
     pub(crate) auth: Auth,
     pub(crate) no_echo: bool,
     pub(crate) connection_timeout: Duration,
@@ -161,6 +167,10 @@ pub(crate) struct Connector {
     /// Server pool with per-server metadata.
     servers: Vec<Server>,
     options: ConnectorOptions,
+    /// The setting or URL that asked for TLS, if any, as error messages name it. When set,
+    /// every attempt to every server uses TLS, discovered servers and reconnects included,
+    /// and nothing the server sends turns it off.
+    tls_asked_by: Option<Cow<'static, str>>,
     pub(crate) connect_stats: Arc<Statistics>,
     attempts: usize,
     pub(crate) events_tx: tokio::sync::mpsc::Sender<Event>,
@@ -180,6 +190,69 @@ pub(crate) fn reconnect_delay_callback_default(attempts: usize) -> Duration {
     }
 }
 
+/// Whether the scheme of the URL asks for TLS.
+fn url_asks_for_tls(addr: &ServerAddr) -> bool {
+    matches!(addr.scheme(), "tls" | "wss")
+}
+
+/// Names the setting that asks for TLS, if any: an option by its name, a `tls://` or
+/// `wss://` URL of the list by the first such URL, without its user info. `tls_first` is
+/// read before `require_tls`, which it also sets. With `tls_optional` nothing asks for TLS;
+/// a `tls://` or `wss://` URL then gets TLS by its own scheme only.
+fn tls_asked_by(options: &ConnectorOptions, servers: &[Server]) -> Option<Cow<'static, str>> {
+    let tls_url = servers.iter().find(|server| url_asks_for_tls(&server.addr));
+    if options.tls_optional {
+        None
+    } else if options.tls_first {
+        Some("tls_first()".into())
+    } else if options.tls_required {
+        Some("require_tls(true)".into())
+    } else if let Some(server) = tls_url {
+        Some(format!("the URL {:?}", without_user_info(&server.addr)).into())
+    } else if !options.certificates.is_empty() {
+        Some("add_root_certificates()".into())
+    } else if options.client_cert.is_some() {
+        Some("add_client_certificate()".into())
+    } else if options.tls_client_config.is_some() {
+        Some("tls_client_config()".into())
+    } else {
+        None
+    }
+}
+
+/// The URL as an error message prints it: with its username and password cleared.
+fn without_user_info(addr: &ServerAddr) -> String {
+    let mut url = addr.clone().into_inner();
+    // Clearing fails only for a URL without a host, which a server URL always has.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.into()
+}
+
+/// The configuration error for a URL in `addrs` that this build or the client's settings
+/// cannot connect to, if there is one: a WebSocket URL in a build without the `websockets`
+/// feature, or a `ws://` URL while `tls_asked_by` names a setting or URL that asks for
+/// TLS. The server list at connect and a pool given later are checked alike.
+///
+/// A `ws://` URL cannot be upgraded: in WebSocket, TLS is fixed by the scheme before the
+/// opening handshake, so dialing `ws://` with TLS would replace the scheme the user wrote,
+/// and dialing it as written would leave out the TLS asked for.
+fn refused_url<'a>(
+    tls_asked_by: Option<&str>,
+    mut addrs: impl Iterator<Item = &'a ServerAddr> + Clone,
+) -> Option<String> {
+    #[cfg(not(feature = "websockets"))]
+    if addrs.clone().any(ServerAddr::is_websocket) {
+        return Some("a ws:// or wss:// URL needs the websockets feature of async-nats".into());
+    }
+    let asked_by = tls_asked_by?;
+    let addr = addrs.find(|addr| addr.scheme() == "ws")?;
+    Some(format!(
+        "{asked_by} asks for TLS, but {:?} is a ws:// URL; wss:// is the TLS form",
+        without_user_info(addr)
+    ))
+}
+
 impl Connector {
     pub(crate) fn new<A: ToServerAddrs>(
         addrs: A,
@@ -188,13 +261,43 @@ impl Connector {
         state_tx: tokio::sync::watch::Sender<State>,
         max_payload: Arc<AtomicUsize>,
         connect_stats: Arc<Statistics>,
-    ) -> Result<Connector, io::Error> {
-        let servers = addrs.to_server_addrs()?.map(Server::new).collect();
+    ) -> Result<Connector, ConnectError> {
+        let servers: Vec<Server> = addrs
+            .to_server_addrs()
+            .map_err(|err| ConnectError::with_source(ConnectErrorKind::ServerParse, err))?
+            .map(Server::new)
+            .collect();
+
+        // Refused here, before any attempt, so that retry_on_initial_connect cannot
+        // retry what no attempt can fix.
+        if options.tls_optional && options.tls_first {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                "tls_optional() cannot be set together with tls_first()",
+            ));
+        }
+        if options.tls_optional && options.tls_required {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                "tls_optional() cannot be set together with require_tls(true)",
+            ));
+        }
+        let tls_asked_by = tls_asked_by(&options, &servers);
+        if let Some(message) = refused_url(
+            tls_asked_by.as_deref(),
+            servers.iter().map(|server| &server.addr),
+        ) {
+            return Err(ConnectError::with_source(
+                ConnectErrorKind::Configuration,
+                message,
+            ));
+        }
 
         Ok(Connector {
             attempts: 0,
             servers,
             options,
+            tls_asked_by,
             events_tx,
             state_tx,
             max_payload,
@@ -206,19 +309,51 @@ impl Connector {
     /// Replaces the server pool. Preserves per-server state for servers that
     /// appear in both the old and new pools.
     ///
-    /// Returns an error if the pool mixes WebSocket (`ws://`, `wss://`) and
-    /// non-websocket (`nats://`, `tls://`) schemes.
-    pub(crate) fn set_server_pool(&mut self, addrs: Vec<ServerAddr>) -> Result<(), String> {
+    /// A `tls://` or `wss://` URL in the pool asks for TLS as it does at connect, unless
+    /// `tls_optional` is set: every later attempt uses TLS, and a later pool does not turn
+    /// it off.
+    ///
+    /// Returns an error, and leaves the pool and whether the client asks for TLS as they
+    /// were, if the pool mixes WebSocket (`ws://`, `wss://`) and non-websocket (`nats://`,
+    /// `tls://`) schemes, or holds a URL that the server list at connect would have been
+    /// refused for: a `ws://` URL is refused when the client asks for TLS, or would once
+    /// the pool is taken.
+    pub(crate) fn set_server_pool(
+        &mut self,
+        addrs: Vec<ServerAddr>,
+    ) -> Result<(), SetServerPoolError> {
         if addrs.is_empty() {
-            return Err("server pool cannot be empty".to_string());
+            return Err(SetServerPoolError::new(SetServerPoolErrorKind::EmptyPool));
         }
 
         // Validate: cannot mix websocket and non-websocket schemes.
         let has_ws = addrs.iter().any(|a| a.is_websocket());
         let has_non_ws = addrs.iter().any(|a| !a.is_websocket());
         if has_ws && has_non_ws {
-            return Err("cannot mix websocket and non-websocket URLs in server pool".to_string());
+            return Err(SetServerPoolError::new(
+                SetServerPoolErrorKind::MixedSchemes,
+            ));
         }
+
+        let tls_asked_by = self.tls_asked_by.clone().or_else(|| {
+            addrs
+                .iter()
+                .find(|addr| !self.options.tls_optional && url_asks_for_tls(addr))
+                .map(|addr| {
+                    format!(
+                        "the URL {:?} given to set_server_pool()",
+                        without_user_info(addr)
+                    )
+                    .into()
+                })
+        });
+        if let Some(message) = refused_url(tls_asked_by.as_deref(), addrs.iter()) {
+            return Err(SetServerPoolError::with_source(
+                SetServerPoolErrorKind::Configuration,
+                message,
+            ));
+        }
+        self.tls_asked_by = tls_asked_by;
 
         let new_servers = addrs
             .into_iter()
@@ -258,6 +393,14 @@ impl Connector {
                             crate::ConnectErrorKind::MaxReconnects,
                             error,
                         ))
+                    }
+                    // A TLS error's text names the setting that asked for TLS. Other errors keep
+                    // only their kind: their text can quote a line from the server, which is not
+                    // escaped.
+                    ConnectErrorKind::Tls => {
+                        self.events_tx
+                            .try_send(Event::ClientError(ClientError::Other(error.to_string())))
+                            .ok();
                     }
                     other => {
                         self.events_tx
@@ -469,6 +612,29 @@ impl Connector {
         }))
     }
 
+    /// Runs the TLS handshake on `stream` and verifies the server certificate.
+    async fn tls_handshake<S>(
+        &self,
+        stream: S,
+        server_addr: &ServerAddr,
+    ) -> Result<tokio_rustls::client::TlsStream<S>, ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        tracing::debug!("upgrading connection to TLS");
+        let tls_config = Arc::new(
+            tls::config_tls(&self.options)
+                .await
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
+        );
+        let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
+
+        let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
+            .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
+
+        Ok(tls_connector.connect(domain.to_owned(), stream).await?)
+    }
+
     pub(crate) async fn try_connect_to(
         &mut self,
         socket_addr: &SocketAddr,
@@ -480,79 +646,53 @@ impl Connector {
             tls_required = %tls_required,
             "establishing connection"
         );
+        let tcp_stream = if let Some(local_addr) = self.options.local_address {
+            let socket = if local_addr.is_ipv4() {
+                TcpSocket::new_v4()?
+            } else {
+                TcpSocket::new_v6()?
+            };
+            socket
+                .bind(local_addr)
+                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
+            socket.connect(*socket_addr).await?
+        } else {
+            TcpStream::connect(socket_addr).await?
+        };
+        tcp_stream.set_nodelay(true)?;
+
         let mut connection = match server_addr.scheme() {
+            // The websocket handshake runs on the client's own stream, so every resolved
+            // address is tried, and TLS sits below the websocket framing as the scheme says:
+            // a wss:// URL gets the same handshake as a tls:// URL, a ws:// URL none.
             #[cfg(feature = "websockets")]
-            "ws" => {
-                let ws = tokio_websockets::client::Builder::new()
-                    .uri(server_addr.as_url_str())
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
-
-                let con = WebSocketAdapter::new(ws.0);
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
-            }
-            #[cfg(feature = "websockets")]
-            "wss" => {
-                let tls_config =
-                    Arc::new(tls::config_tls(&self.options).await.map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Tls, err)
-                    })?);
-                let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-                let ws = tokio_websockets::client::Builder::new()
-                    .connector(&tokio_websockets::Connector::Rustls(tls_connector))
-                    .uri(server_addr.as_url_str())
-                    .map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
-                    })?
-                    .connect()
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
-                let con = WebSocketAdapter::new(ws.0);
-                Connection::new(Box::new(con), 0, self.connect_stats.clone())
-            }
-            _ => {
-                let tcp_stream = if let Some(local_addr) = self.options.local_address {
-                    let socket = if local_addr.is_ipv4() {
-                        TcpSocket::new_v4()?
-                    } else {
-                        TcpSocket::new_v6()?
-                    };
-                    socket.bind(local_addr).map_err(|err| {
-                        ConnectError::with_source(crate::ConnectErrorKind::Io, err)
-                    })?;
-                    socket.connect(*socket_addr).await?
+            "ws" | "wss" => {
+                let stream: Box<dyn AsyncReadWrite> = if server_addr.scheme() == "wss" {
+                    Box::new(self.tls_handshake(tcp_stream, &server_addr).await?)
                 } else {
-                    TcpStream::connect(socket_addr).await?
+                    Box::new(tcp_stream)
                 };
-                tcp_stream.set_nodelay(true)?;
+                let ws = tokio_websockets::client::Builder::new()
+                    .uri(server_addr.as_url_str())
+                    .map_err(|err| {
+                        ConnectError::with_source(crate::ConnectErrorKind::ServerParse, err)
+                    })?
+                    .connect_on(stream)
+                    .await
+                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Io, err))?;
 
-                Connection::new(
-                    Box::new(tcp_stream),
-                    self.options.read_buffer_capacity.into(),
-                    self.connect_stats.clone(),
-                )
+                let con = WebSocketAdapter::new(ws.0);
+                Connection::new(Box::new(con), 0, self.connect_stats.clone())
             }
+            _ => Connection::new(
+                Box::new(tcp_stream),
+                self.options.read_buffer_capacity.into(),
+                self.connect_stats.clone(),
+            ),
         };
 
         let tls_connection = |connection: Connection| async {
-            tracing::debug!("upgrading connection to TLS");
-            let tls_config = Arc::new(
-                tls::config_tls(&self.options)
-                    .await
-                    .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?,
-            );
-            let tls_connector = tokio_rustls::TlsConnector::from(tls_config);
-
-            let domain = crate::rustls::pki_types::ServerName::try_from(server_addr.host())
-                .map_err(|err| ConnectError::with_source(crate::ConnectErrorKind::Tls, err))?;
-
-            let tls_stream = tls_connector
-                .connect(domain.to_owned(), connection.stream)
-                .await?;
+            let tls_stream = self.tls_handshake(connection.stream, &server_addr).await?;
 
             Ok::<Connection, ConnectError>(Connection::new(
                 Box::new(tls_stream),
@@ -597,8 +737,30 @@ impl Connector {
         // If `tls_first` was not set, establish TLS connection if it is required.
         if !self.options.tls_first
             && !server_addr.is_websocket()
-            && (self.options.tls_required || info.tls_required || tls_required)
+            && (self.tls_asked_by.is_some() || info.tls_required || tls_required)
         {
+            // A server whose INFO neither requires nor offers TLS cannot answer the
+            // handshake. Instead of starting one, say which server, what asked for TLS and,
+            // where the server's own URL did not, how to leave TLS to it.
+            if !info.tls_required && !info.tls_available {
+                let server = format!("{:?}", without_user_info(&server_addr));
+                let message = match &self.tls_asked_by {
+                    Some(asked_by) if !server_addr.tls_required() => format!(
+                        "{asked_by} asks for TLS, but {server} does not offer it; \
+                         tls_optional() leaves TLS to each server"
+                    ),
+                    Some(asked_by) => {
+                        format!("{asked_by} asks for TLS, but {server} does not offer it")
+                    }
+                    None => {
+                        format!("the URL {server} asks for TLS, but {server} does not offer it")
+                    }
+                };
+                return Err(ConnectError::with_source(
+                    crate::ConnectErrorKind::Tls,
+                    message,
+                ));
+            }
             connection = tls_connection(connection).await?;
         };
 
@@ -619,7 +781,7 @@ impl Connector {
         }
 
         // Build CONNECT message with auth info.
-        let tls_required = self.options.tls_required || server_addr.tls_required();
+        let tls_required = self.tls_asked_by.is_some() || server_addr.tls_required();
         let mut connect_info = ConnectInfo {
             tls_required,
             name: self.options.name.clone(),
@@ -741,6 +903,123 @@ impl Connector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn options() -> ConnectorOptions {
+        ConnectorOptions {
+            tls_required: false,
+            certificates: Vec::new(),
+            client_cert: None,
+            client_key: None,
+            tls_client_config: None,
+            tls_first: false,
+            tls_optional: false,
+            auth: Auth::default(),
+            no_echo: false,
+            connection_timeout: Duration::from_secs(5),
+            name: None,
+            ignore_discovered_servers: false,
+            retain_servers_order: false,
+            read_buffer_capacity: 65535,
+            reconnect_delay_callback: Arc::new(reconnect_delay_callback_default),
+            auth_callback: None,
+            max_reconnects: None,
+            local_address: None,
+            reconnect_to_server_callback: None,
+        }
+    }
+
+    fn servers(urls: &[&str]) -> Vec<Server> {
+        urls.iter()
+            .map(|url| Server::new(url.parse().unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn tls_is_asked_for_by_every_tls_setting() {
+        let plain = servers(&["nats://localhost:4222", "ws://localhost:8080"]);
+        assert_eq!(tls_asked_by(&options(), &plain), None);
+
+        let tls_client_config = rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        for (expected, options) in [
+            (
+                "require_tls(true)",
+                ConnectorOptions {
+                    tls_required: true,
+                    ..options()
+                },
+            ),
+            (
+                "tls_first()",
+                ConnectorOptions {
+                    tls_required: true,
+                    tls_first: true,
+                    ..options()
+                },
+            ),
+            (
+                "add_root_certificates()",
+                ConnectorOptions {
+                    certificates: vec![PathBuf::from("ca.pem")],
+                    ..options()
+                },
+            ),
+            (
+                "add_client_certificate()",
+                ConnectorOptions {
+                    client_cert: Some(PathBuf::from("cert.pem")),
+                    client_key: Some(PathBuf::from("key.pem")),
+                    ..options()
+                },
+            ),
+            (
+                "tls_client_config()",
+                ConnectorOptions {
+                    tls_client_config: Some(tls_client_config),
+                    ..options()
+                },
+            ),
+        ] {
+            assert_eq!(tls_asked_by(&options, &plain).as_deref(), Some(expected));
+        }
+
+        // One URL asks for TLS for the whole list, whatever its case, and is named without
+        // its user info.
+        for (urls, expected) in [
+            (
+                ["nats://localhost:4222", "tls://localhost:4223"],
+                r#"the URL "tls://localhost:4223""#,
+            ),
+            (
+                ["ws://localhost:8080", "wss://derek:porkchop@localhost:8443"],
+                r#"the URL "wss://localhost:8443/""#,
+            ),
+            (
+                ["nats://localhost:4222", "TLS://localhost:4223"],
+                r#"the URL "tls://localhost:4223""#,
+            ),
+        ] {
+            assert_eq!(
+                tls_asked_by(&options(), &servers(&urls)).as_deref(),
+                Some(expected),
+                "{urls:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tls_optional_asks_for_no_tls() {
+        let options = ConnectorOptions {
+            tls_optional: true,
+            certificates: vec![PathBuf::from("ca.pem")],
+            client_cert: Some(PathBuf::from("cert.pem")),
+            client_key: Some(PathBuf::from("key.pem")),
+            ..options()
+        };
+        let mixed = servers(&["nats://localhost:4222", "tls://localhost:4223"]);
+        assert_eq!(tls_asked_by(&options, &mixed), None);
+    }
 
     #[test]
     fn reconnect_delay_callback_duration() {

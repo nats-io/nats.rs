@@ -42,10 +42,11 @@ ring = { version = "0.17", optional = true }
 rand = "0.10.1"
 rustls-webpki = { package = "rustls-webpki", default-features = false, version = "0.103.10" }
 portable-atomic = "1"
-# async-nats always hands tokio-websockets its own rustls connector for `wss://` (see
-# `Connector::Rustls` in connector.rs), so no root store is needed here. `sha1_smol` computes the
-# RFC 6455 handshake digest; under `fips` aws-lc computes it instead (see the `fips` feature).
-tokio-websockets = { version = "0.13.3", default-features = false, features = ["client", "rand", "rustls-bring-your-own-connector", "sha1_smol"], optional = true }
+# async-nats opens the stream and runs the TLS handshake itself, then hands the stream to
+# tokio-websockets (see `connect_on` in connector.rs), so no TLS connector or root store is needed
+# here. `sha1_smol` computes the RFC 6455 handshake digest; under `fips` aws-lc computes it instead
+# (see the `fips` feature).
+tokio-websockets = { version = "0.13.3", default-features = false, features = ["client", "rand", "sha1_smol"], optional = true }
 pin-project = "1.0"
 
 [dev-dependencies]

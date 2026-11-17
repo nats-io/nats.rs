@@ -51,6 +51,7 @@ pub struct ConnectOptions {
     pub(crate) auth: Auth,
     pub(crate) tls_required: bool,
     pub(crate) tls_first: bool,
+    pub(crate) tls_optional: bool,
     pub(crate) certificates: Vec<PathBuf>,
     pub(crate) client_cert: Option<PathBuf>,
     pub(crate) client_key: Option<PathBuf>,
@@ -85,6 +86,7 @@ impl fmt::Debug for ConnectOptions {
             .entry(&"client_key", &self.client_key)
             .entry(&"tls_client_config", &"XXXXXXXX")
             .entry(&"tls_first", &self.tls_first)
+            .entry(&"tls_optional", &self.tls_optional)
             .entry(&"ping_interval", &self.ping_interval)
             .entry(&"sender_capacity", &self.sender_capacity)
             .entry(&"inbox_prefix", &self.inbox_prefix)
@@ -104,6 +106,7 @@ impl Default for ConnectOptions {
             connection_timeout: Duration::from_secs(5),
             tls_required: false,
             tls_first: false,
+            tls_optional: false,
             certificates: Vec::new(),
             client_cert: None,
             client_key: None,
@@ -529,6 +532,9 @@ impl ConnectOptions {
 
     /// Loads root certificates by providing the path to them.
     ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -547,6 +553,9 @@ impl ConnectOptions {
 
     /// Loads client certificate by providing the path to it.
     ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -564,7 +573,15 @@ impl ConnectOptions {
         self
     }
 
-    /// Sets or disables TLS requirement. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
+    /// Requires TLS for every server when `true`. If TLS connection is impossible while `options.require_tls(true)` connection will return error.
+    ///
+    /// A `tls://` or `wss://` server URL, root certificates, a client certificate, a TLS client
+    /// config and [`ConnectOptions::tls_first`] ask for TLS too. TLS then applies to every
+    /// server in the list, servers discovered from the cluster and reconnects included, and
+    /// nothing the server sends turns it off.
+    ///
+    /// `false` is the default, and leaves the other settings asking for TLS. The opt-out
+    /// is [`ConnectOptions::tls_optional`].
     ///
     /// # Examples
     /// ```no_run
@@ -588,6 +605,30 @@ impl ConnectOptions {
     pub fn tls_first(mut self) -> ConnectOptions {
         self.tls_first = true;
         self.tls_required = true;
+        self
+    }
+
+    /// Leaves TLS to each server: the client does not ask for TLS, so root certificates, a
+    /// client certificate, a TLS client config or a `tls://` or `wss://` URL in the list no
+    /// longer make the other servers TLS. Each server is connected to as its own URL says, or
+    /// with TLS when its INFO requires it; a `tls://` or `wss://` URL still gets TLS.
+    ///
+    /// Cannot be set together with `require_tls(true)` or [`ConnectOptions::tls_first`].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::ConnectError> {
+    /// let nc = async_nats::ConnectOptions::new()
+    ///     .add_root_certificates("mycerts.pem".into())
+    ///     .tls_optional()
+    ///     .connect(["nats://plain.nats.io", "tls://secure.nats.io"].as_slice())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tls_optional(mut self) -> ConnectOptions {
+        self.tls_optional = true;
         self
     }
 
@@ -968,6 +1009,9 @@ impl ConnectOptions {
     }
 
     /// Allows passing custom rustls tls config.
+    ///
+    /// Asks for TLS: every server is then connected to with TLS, as with
+    /// [`ConnectOptions::require_tls`].
     ///
     /// # Examples
     /// ```
