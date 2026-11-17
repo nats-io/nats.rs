@@ -1,3 +1,42 @@
+# v0.53.0
+
+## Overview
+
+This release fixes security issues in how the client decides to use TLS and which servers it takes from the cluster. Some fixes change how the client connects: read the breaking and behaviour changes before upgrading.
+
+## Added
+* `ConnectOptions::tls_optional` (#1686), `ConnectOptions::tls_server_name` and `ConnectOptions::verify_discovered_servers_by_ip` (#1687)
+
+## Fixed
+* TLS options: one TLS requirement per connection, an opt-out, and configuration errors by @Jarema in https://github.com/nats-io/nats.rs/pull/1686
+* Discovered servers: host:port entries, learned transport and TLS, trusted names by @Jarema in https://github.com/nats-io/nats.rs/pull/1687
+* Use the server list from the INFO received inside TLS; apply later lists by @Jarema in https://github.com/nats-io/nats.rs/pull/1688
+* Return an error instead of panicking on two malformed server lines by @Jarema in https://github.com/nats-io/nats.rs/pull/1681
+* Fix clippy needless_bool in is_server_compatible by @Jarema in https://github.com/nats-io/nats.rs/pull/1682
+
+## Changed
+* Document the TLS settings on ConnectOptions and README by @Jarema in https://github.com/nats-io/nats.rs/pull/1689
+
+## Breaking changes
+* **New `Configuration` variants** of `ConnectErrorKind` and `SetServerPoolErrorKind`, and a public field `ServerInfo::tls_available`. Exhaustive `match`es need a new arm, `ServerInfo` literals need `..Default::default()` (#1686)
+* **A server without TLS where TLS is asked for, or a certificate not valid for the expected name, is a `Tls` error,** not `Io`. For the name check, the `io::Error` is one `source()` deeper (#1686, #1687)
+* **WebSocket connections open on the client's own TCP stream,** so every resolved address is tried and `local_address` applies. A failed TCP connect or TLS handshake no longer has a `tokio_websockets::Error` as its source (#1686)
+* **tokio-rustls 0.26.3** or later, which needs rustls 0.23.27 (#1687)
+
+## Behaviour changes
+* **TLS settings ask for TLS.** Root certificates, a client certificate, `tls_client_config()` and the new `tls_server_name()` and `verify_discovered_servers_by_ip()` act like `require_tls(true)`. Against a server without TLS, the connection fails with an error naming the server and the setting. To leave TLS to each server, set `tls_optional()` (#1686, #1687)
+* **TLS applies to every server.** When anything asks for TLS, every server is dialed with TLS: discovered servers, reconnects, `nats://` URLs in a mixed list, and every attempt once `Client::set_server_pool` is given a `tls://` or `wss://` URL. Then `connect` and `set_server_pool` refuse a `ws://` URL with a `Configuration` error: write `wss://`. `tls_optional()` dials each URL with its own scheme. A build without the `websockets` feature refuses any WebSocket URL (#1686)
+* **Discovered servers keep the transport and TLS they were learned on.** A node without TLS is no longer reached through nodes with TLS: configure it at connect as a `nats://` URL, with `tls_optional()` if the client asks for TLS. `Client::server_pool()` and `reconnect_to_server_callback` list a server learned over TLS as `tls://` or `wss://`, and one learned over WebSocket as `ws://`; a callback that returns another URL gets `ClientError::ServerNotInPool`. A server given to `Client::set_server_pool` is verified like a configured server (#1687)
+* **A `connect_urls` entry is `host:port` only.** Other entries are skipped with a log line. User info in an entry is dropped and the client uses its own credentials (#1687)
+* **Discovered servers are verified against a name the client trusts:** a discovered IP address against the name its reporting server was verified under. A cluster whose certificates carry only IP addresses needs `verify_discovered_servers_by_ip()`; a client that reaches a cluster by IP address needs that or `tls_server_name()`. A discovered host name is verified against itself: with system or shared roots, give the cluster's CA as the only root, or set `ignore_discovered_servers()` (#1687)
+* **A server that requires TLS, learned over a connection without TLS,** is verified against the configured server's host name if it is listed by IP address, and is not connected to if it is listed by host name. Set `tls_optional()`, plus a `tls://` URL for that server or `tls_server_name()` (#1687)
+* **With TLS after INFO (not `tls_first()`), discovered servers come only from the INFO received inside TLS.** Against nats-server before 2.12, a client configured with one server may have nothing to fail over to: configure more than one, or use `tls_first()`. Against 2.12 or later, each attempt waits for the INFO after the first PONG, up to the connection timeout; `ignore_discovered_servers()` skips it (#1688)
+* **Later INFOs are applied.** A `connect_urls` list on an established connection replaces the discovered servers, as in nats.go. `Client::server_info()` and `max_payload` follow every INFO; `server_info().nonce` is empty after a later one, which with TLS after INFO against 2.12 or later is at connect (#1688)
+
+**Full Changelog**: https://github.com/nats-io/nats.rs/compare/async-nats/v0.52.0...async-nats/v0.53.0
+
+
+
 # v0.52.0
 ## Overview
 
