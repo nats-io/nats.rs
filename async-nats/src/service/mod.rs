@@ -89,6 +89,9 @@ pub struct Stats {
     pub id: String,
     // Service version.
     pub version: String,
+    /// Additional metadata
+    #[serde(default, deserialize_with = "endpoint::null_meta_as_default")]
+    pub metadata: HashMap<String, String>,
     #[serde(with = "rfc3339")]
     pub started: DateTime,
     /// Statistics of all endpoints.
@@ -415,6 +418,7 @@ impl Service {
                                 name: info.name.clone(),
                                 id: info.id.clone(),
                                 version: info.version.clone(),
+                                metadata: info.metadata.clone(),
                                 started,
                                 endpoints: endpoints_state.lock().unwrap().endpoints.values().cloned().map(Into::into).collect(),
                             })?;
