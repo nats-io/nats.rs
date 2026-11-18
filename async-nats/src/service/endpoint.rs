@@ -156,6 +156,17 @@ impl From<Inner> for Stats {
     }
 }
 
+impl From<&Inner> for Info {
+    fn from(inner: &Inner) -> Self {
+        Info {
+            name: inner.name.clone(),
+            subject: inner.subject.clone(),
+            queue_group: inner.queue_group.clone(),
+            metadata: inner.metadata.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Stats {
     /// Endpoint name.

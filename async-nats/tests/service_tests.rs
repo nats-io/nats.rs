@@ -550,6 +550,7 @@ mod service {
         .unwrap();
 
         assert_eq!(&endpoint_info, info.endpoints.first().unwrap());
+        assert_eq!(vec![endpoint_info], service.info().await.endpoints);
     }
 
     #[tokio::test]
