@@ -397,22 +397,7 @@ impl Service {
                         },
                         Some(info_request) = infos.next() => {
                             let Some(reply) = info_request.reply else { continue };
-                            let info = info.clone();
-
-                            let endpoints: Vec<endpoint::Info> = {
-                                endpoints_state.lock().unwrap().endpoints.values().map(|value| {
-                                    endpoint::Info {
-                                        name: value.name.to_owned(),
-                                        subject: value.subject.to_owned(),
-                                        queue_group: value.queue_group.to_owned(),
-                                        metadata: value.metadata.to_owned()
-                                    }
-                                }).collect()
-                            };
-                            let info = Info {
-                                endpoints,
-                                ..info
-                            };
+                            let info = info_with_endpoints(&info, &endpoints_state);
                             let info_json = serde_json::to_vec(&info).map(Bytes::from)?;
                             client.publish(reply, info_json.clone()).await?;
                         },
@@ -486,7 +471,7 @@ impl Service {
 
     /// Returns [Info] for this service instance.
     pub async fn info(&self) -> Info {
-        self.info.clone()
+        info_with_endpoints(&self.info, &self.endpoints_state)
     }
 
     /// Creates a group for endpoints under common prefix.
@@ -724,6 +709,20 @@ async fn verb_subscription(
         .subscribe(format!("{SERVICE_API_PREFIX}.{verb}.{name}.{id}"))
         .await?;
     Ok(stream::select_all([verb_all, verb_id, verb_name]).fuse())
+}
+
+fn info_with_endpoints(info: &Info, endpoints_state: &Mutex<Endpoints>) -> Info {
+    let endpoints = endpoints_state
+        .lock()
+        .unwrap()
+        .endpoints
+        .values()
+        .map(endpoint::Info::from)
+        .collect();
+    Info {
+        endpoints,
+        ..info.clone()
+    }
 }
 
 type ShutdownReceiverFuture = Pin<
