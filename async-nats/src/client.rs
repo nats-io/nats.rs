@@ -21,6 +21,7 @@ use crate::subject::ToSubject;
 use crate::ServerInfo;
 
 use super::{header::HeaderMap, status::StatusCode, Command, Message, Subscriber};
+use crate::delivery::{Delivery, SubscriptionHandle};
 use crate::error::Error;
 use bytes::Bytes;
 use futures_util::future::TryFutureExt;
@@ -792,23 +793,77 @@ impl Client {
     /// # }
     /// ```
     pub async fn subscribe<S: ToSubject>(&self, subject: S) -> Result<Subscriber, SubscribeError> {
+        let (sender, receiver) = mpsc::channel(self.subscription_capacity);
+        let sid = self
+            .subscribe_into(subject, None, Delivery::Own(sender))
+            .await?;
+        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+    }
+
+    /// Subscribes to a subject, delivering its messages into a channel the caller owns.
+    ///
+    /// Each message arrives tagged with the returned [SubscriptionHandle]'s sid, so one channel
+    /// can serve many subscriptions. Dropping the handle unsubscribes; a message the server sent
+    /// before the unsubscribe reached it can still arrive with its sid. A full channel drops the
+    /// message and reports [crate::Event::SlowConsumer] with the sid.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
+    /// let orders = client.subscribe_with_sender("orders.>", sender.clone()).await?;
+    /// let users = client.subscribe_with_sender("users.>", sender).await?;
+    /// while let Some((sid, message)) = receiver.recv().await {
+    ///     if sid == orders.sid() {
+    ///         println!("order: {:?}", message);
+    ///     } else if sid == users.sid() {
+    ///         println!("user: {:?}", message);
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_with_sender<S: ToSubject>(
+        &self,
+        subject: S,
+        sender: mpsc::Sender<(u64, Message)>,
+    ) -> Result<SubscriptionHandle, SubscribeError> {
+        let sid = self
+            .subscribe_into(subject, None, Delivery::Shared(sender))
+            .await?;
+        Ok(SubscriptionHandle::new(sid, self.sender.clone()))
+    }
+
+    async fn subscribe_into<S: ToSubject>(
+        &self,
+        subject: S,
+        queue_group: Option<String>,
+        delivery: Delivery,
+    ) -> Result<u64, SubscribeError> {
         let subject = self
             .validate_subscribe_subject(subject)
             .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
 
-        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel(self.subscription_capacity);
+        if let Some(queue_group) = &queue_group {
+            if !crate::is_valid_queue_group(queue_group) {
+                return Err(SubscribeError::new(SubscribeErrorKind::InvalidQueueName));
+            }
+        }
 
+        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         self.sender
             .send(Command::Subscribe {
                 sid,
                 subject,
-                queue_group: None,
-                sender,
+                queue_group,
+                sender: delivery,
             })
             .await?;
 
-        Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+        Ok(sid)
     }
 
     /// Subscribes to a subject with a queue group to receive [messages][Message].
@@ -837,27 +892,42 @@ impl Client {
         subject: S,
         queue_group: String,
     ) -> Result<Subscriber, SubscribeError> {
-        let subject = self
-            .validate_subscribe_subject(subject)
-            .map_err(|e| SubscribeError::with_source(SubscribeErrorKind::InvalidSubject, e))?;
-
-        if !crate::is_valid_queue_group(&queue_group) {
-            return Err(SubscribeError::new(SubscribeErrorKind::InvalidQueueName));
-        }
-
-        let sid = self.next_subscription_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel(self.subscription_capacity);
-
-        self.sender
-            .send(Command::Subscribe {
-                sid,
-                subject,
-                queue_group: Some(queue_group),
-                sender,
-            })
+        let sid = self
+            .subscribe_into(subject, Some(queue_group), Delivery::Own(sender))
             .await?;
-
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
+    }
+
+    /// Subscribes to a subject with a queue group, delivering its messages into a channel the
+    /// caller owns, as [Client::subscribe_with_sender] does.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), async_nats::Error> {
+    /// let client = async_nats::connect("demo.nats.io").await?;
+    /// let (sender, mut receiver) = tokio::sync::mpsc::channel(1024);
+    /// let orders = client
+    ///     .queue_subscribe_with_sender("orders.>", "workers".into(), sender)
+    ///     .await?;
+    /// while let Some((sid, message)) = receiver.recv().await {
+    ///     println!("{} {:?}", sid == orders.sid(), message);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn queue_subscribe_with_sender<S: ToSubject>(
+        &self,
+        subject: S,
+        queue_group: String,
+        sender: mpsc::Sender<(u64, Message)>,
+    ) -> Result<SubscriptionHandle, SubscribeError> {
+        let sid = self
+            .subscribe_into(subject, Some(queue_group), Delivery::Shared(sender))
+            .await?;
+        Ok(SubscriptionHandle::new(sid, self.sender.clone()))
     }
 
     /// Flushes the internal buffer ensuring that all messages are sent.

@@ -244,6 +244,8 @@ pub use tokio_rustls::rustls;
 use connection::{Connection, State};
 use connector::{Connector, ConnectorOptions};
 pub use connector::{ReconnectToServer, Server};
+use delivery::Delivery;
+pub use delivery::SubscriptionHandle;
 pub use header::{HeaderMap, HeaderName, HeaderValue};
 pub use subject::{Subject, SubjectError, ToSubject};
 
@@ -252,6 +254,7 @@ pub(crate) mod auth_utils;
 pub mod client;
 pub mod connection;
 mod connector;
+mod delivery;
 mod options;
 
 pub use auth::Auth;
@@ -399,7 +402,7 @@ pub(crate) enum Command {
         sid: u64,
         subject: Subject,
         queue_group: Option<String>,
-        sender: mpsc::Sender<Message>,
+        sender: Delivery,
     },
     Unsubscribe {
         sid: u64,
@@ -447,7 +450,7 @@ pub(crate) enum ClientOp {
 #[derive(Debug)]
 struct Subscription {
     subject: Subject,
-    sender: mpsc::Sender<Message>,
+    sender: Delivery,
     queue_group: Option<String>,
     delivered: u64,
     max: Option<u64>,
@@ -756,7 +759,7 @@ impl ConnectionHandler {
 
                     // if the channel for subscription was dropped, remove the
                     // subscription from the map and unsubscribe.
-                    match subscription.sender.try_send(message) {
+                    match subscription.sender.try_send(sid, message) {
                         Ok(_) => {
                             subscription.delivered += 1;
                             // if this `Subscription` has set `max` value, check if it
@@ -1444,32 +1447,36 @@ fn drop_unsubscribe_command(sid: u64) -> Command {
     Command::Unsubscribe { sid, max: None }
 }
 
+/// Best-effort unsubscribe for a dropped subscription. `Drop` can run outside a Tokio runtime
+/// (unwinding, teardown, plain threads), so start with synchronous `try_send` and only spawn an
+/// async retry when the command channel is full and a runtime is available.
+pub(crate) fn unsubscribe_on_drop(sender: &mpsc::Sender<Command>, sid: u64, dropped: &'static str) {
+    match sender.try_send(drop_unsubscribe_command(sid)) {
+        Ok(()) => {}
+        Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let sender = sender.clone();
+                handle.spawn(async move {
+                    if let Err(err) = sender.send(command).await {
+                        debug!("failed to send unsubscribe in {dropped}::drop: {err}");
+                    }
+                });
+            } else {
+                debug!(
+                    "failed to send unsubscribe in {dropped}::drop: command channel full and no runtime"
+                );
+            }
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            debug!("failed to send unsubscribe in {dropped}::drop: command channel closed");
+        }
+    }
+}
+
 impl Drop for Subscriber {
     fn drop(&mut self) {
         self.receiver.close();
-        // Best-effort unsubscribe. `Drop` can run outside a Tokio runtime (unwinding, teardown,
-        // plain threads), so start with synchronous `try_send` and only spawn an async retry when
-        // the command channel is full and a runtime is available.
-        match self.sender.try_send(drop_unsubscribe_command(self.sid)) {
-            Ok(()) => {}
-            Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    let sender = self.sender.clone();
-                    handle.spawn(async move {
-                        if let Err(err) = sender.send(command).await {
-                            debug!("failed to send unsubscribe in Subscriber::drop: {err}");
-                        }
-                    });
-                } else {
-                    debug!(
-                        "failed to send unsubscribe in Subscriber::drop: command channel full and no runtime"
-                    );
-                }
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                debug!("failed to send unsubscribe in Subscriber::drop: command channel closed");
-            }
-        }
+        unsubscribe_on_drop(&self.sender, self.sid, "Subscriber");
     }
 }
 
