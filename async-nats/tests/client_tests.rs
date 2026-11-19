@@ -1637,6 +1637,54 @@ mod client {
             .expect("Expected to be able to create a new client");
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn drain_subscription_receives_messages_in_flight() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        for round in 0..5 {
+            let subject = format!("test.{round}");
+            let mut sub = client.subscribe(subject.clone()).await.unwrap();
+
+            // The server routes all of these to the subscription before it reads the UNSUB, and
+            // many of them are still on their way when the drain starts.
+            for i in 0..3000 {
+                client
+                    .publish(subject.clone(), i.to_string().into())
+                    .await
+                    .unwrap();
+            }
+            sub.drain().await.unwrap();
+
+            let mut received = 0;
+            while sub.next().await.is_some() {
+                received += 1;
+            }
+            assert_eq!(received, 3000, "round {round}");
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_subscription_is_not_resubscribed_after_reconnect() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let other = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut sub = client.subscribe("test").await.unwrap();
+
+        // The connection goes away before the pong for the drain's ping is read.
+        sub.drain().await.unwrap();
+        client.force_reconnect().await.unwrap();
+        assert!(sub.next().await.is_none());
+
+        // Once the server has processed what the reconnected client sent, nobody should be
+        // subscribed to the subject anymore.
+        let err = client.request("other", "".into()).await.unwrap_err();
+        assert_eq!(RequestErrorKind::NoResponders, err.kind());
+        let err = other.request("test", "data".into()).await.unwrap_err();
+        assert_eq!(RequestErrorKind::NoResponders, err.kind());
+    }
+
     #[tokio::test]
     async fn subject_validation_rejects_bad_subjects() {
         let server = nats_server::run_basic_server();
