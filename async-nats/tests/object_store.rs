@@ -20,7 +20,7 @@ mod object_store {
             object_store::{AddLinkErrorKind, InfoErrorKind, ObjectMetadata, UpdateMetadata},
             stream::DirectGetErrorKind,
         },
-        HeaderMap,
+        ConnectOptions, HeaderMap,
     };
     use base64::Engine;
     use futures_util::StreamExt;
@@ -907,5 +907,56 @@ mod object_store {
                 .unwrap()
                 .get("X-Custom")
         );
+    }
+
+    // Each read creates an ordered consumer, which must go once the read is done with it.
+    // Left until its inactive threshold instead, the consumers pile up and reads fail with
+    // "maximum consumers limit reached" once the stream's limit is hit.
+    #[tokio::test]
+    async fn get_deletes_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream_consumer_limit.conf");
+        let client = ConnectOptions::with_user_and_password("limited".into(), "limited".into())
+            .connect(server.client_url())
+            .await
+            .unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+
+        let bucket = jetstream
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: "consumers".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        bucket
+            .put("small", &mut io::Cursor::new(vec![1u8; 1024]))
+            .await
+            .unwrap();
+        // Several chunks, so a read can stop half way.
+        bucket
+            .put("large", &mut io::Cursor::new(vec![2u8; 1024 * 1024]))
+            .await
+            .unwrap();
+
+        // Ten times the account's limit of 10 consumers per stream.
+        for _ in 0..100 {
+            let mut object = bucket.get("small").await.unwrap();
+            let mut data = Vec::new();
+            object.read_to_end(&mut data).await.unwrap();
+        }
+        // Dropped after the first chunk.
+        for _ in 0..5 {
+            let mut object = bucket.get("large").await.unwrap();
+            object.read_exact(&mut [0u8; 16]).await.unwrap();
+        }
+
+        let mut stream = jetstream.get_stream("OBJ_consumers").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while stream.info().await.unwrap().state.consumer_count > 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("consumers left behind after reads");
     }
 }

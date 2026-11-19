@@ -23,7 +23,7 @@ use crate::{
     connection::State,
     error::Error,
     jetstream::{self, response::Response, Context, Message},
-    StatusCode, Subscriber,
+    Command, StatusCode, Subscriber,
 };
 
 #[cfg(feature = "server_2_11")]
@@ -528,6 +528,11 @@ impl Consumer<OrderedConfig> {
     }
 }
 
+/// Messages of an ordered push consumer, recreating the consumer whenever it falls out of order.
+///
+/// Dropping it deletes the current consumer, as nats.go does on unsubscribe. The delete is best
+/// effort: if it cannot be sent, the server removes the consumer once it has been inactive for
+/// 30 seconds.
 pub struct Ordered {
     context: Context,
     consumer: Consumer<OrderedConfig>,
@@ -579,6 +584,32 @@ impl Ordered {
             && info.name == self.consumer_name
             && info.num_pending == 0
             && info.delivered.consumer_sequence == self.consumer_sequence.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for Ordered {
+    fn drop(&mut self) {
+        // `drop` cannot await, so the delete request goes straight to the connection handler,
+        // as the unsubscribe in `Subscriber::drop` does, and nothing waits for its response.
+        // If it cannot be queued, the inactive threshold removes the consumer instead.
+        let (sender, _) = tokio::sync::oneshot::channel();
+        let command = Command::Request {
+            subject: format!(
+                "{}.CONSUMER.DELETE.{}.{}",
+                self.context.prefix, self.consumer.info.stream_name, self.consumer_name
+            )
+            .into(),
+            payload: Bytes::new(),
+            respond: self.context.client.new_inbox().into(),
+            headers: None,
+            sender,
+        };
+        if let Err(err) = self.context.client.sender.try_send(command) {
+            debug!(
+                "failed to delete ordered consumer {} on drop: {err}",
+                self.consumer_name
+            );
+        }
     }
 }
 
