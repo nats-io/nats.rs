@@ -181,14 +181,7 @@ impl traits::Publisher for Client {
     }
 
     async fn publish_message(&self, msg: OutboundMessage) -> Result<(), PublishError> {
-        if msg.subject.is_empty()
-            || (!self.skip_subject_validation && !crate::is_valid_publish_subject(&msg.subject))
-        {
-            return Err(PublishError::with_source(
-                PublishErrorKind::InvalidSubject,
-                crate::subject::SubjectError::InvalidFormat,
-            ));
-        }
+        self.validate_outbound_subjects(&msg)?;
         self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
             .map_err(max_payload_error)?;
         self.sender
@@ -215,6 +208,7 @@ impl Sink<OutboundMessage> for Client {
     }
 
     fn start_send(mut self: Pin<&mut Self>, msg: OutboundMessage) -> Result<(), Self::Error> {
+        self.validate_outbound_subjects(&msg)?;
         self.check_payload_size(msg.headers.as_ref(), msg.payload.len())
             .map_err(max_payload_error)?;
         self.poll_sender
@@ -258,6 +252,22 @@ impl Client {
             connection_stats: statistics,
             skip_subject_validation,
         }
+    }
+
+    /// Validates the subject and optional reply subject of an outbound message.
+    /// Used by the raw message paths (`publish_message` and the `Sink` impl), which
+    /// otherwise would let a space in the reply subject split the `PUB` line.
+    fn validate_outbound_subjects(&self, msg: &OutboundMessage) -> Result<(), PublishError> {
+        let valid = |s: &str| {
+            !s.is_empty() && (self.skip_subject_validation || crate::is_valid_publish_subject(s))
+        };
+        if !valid(msg.subject.as_str()) || msg.reply.as_deref().is_some_and(|r| !valid(r)) {
+            return Err(PublishError::with_source(
+                PublishErrorKind::InvalidSubject,
+                crate::subject::SubjectError::InvalidFormat,
+            ));
+        }
+        Ok(())
     }
 
     /// Validates a subject for publishing (protocol-framing safety only).
