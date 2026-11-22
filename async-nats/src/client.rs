@@ -26,18 +26,22 @@ use bytes::Bytes;
 use futures_util::future::TryFutureExt;
 use futures_util::{Sink, SinkExt as _, StreamExt};
 use portable_atomic::AtomicU64;
-use regex::Regex;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
 
-static VERSION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\Av?([0-9]+)\.?([0-9]+)?\.?([0-9]+)?").unwrap());
+/// Whether the server version `version` is at least `major.minor.patch`. The version comes
+/// from the server: one the connector cannot parse counts as not compatible.
+fn server_version_at_least(version: &str, major: i64, minor: i64, patch: i64) -> bool {
+    crate::connector::parse_server_version(version).is_some_and(|(a, b, c)| {
+        (i128::from(a), i128::from(b), i128::from(c))
+            >= (i128::from(major), i128::from(minor), i128::from(patch))
+    })
+}
 
 /// An error returned from the [`Client::publish`], [`Client::publish_with_headers`],
 /// [`Client::publish_with_reply`] or [`Client::publish_with_reply_and_headers`] functions.
@@ -401,27 +405,7 @@ impl Client {
     pub fn is_server_compatible(&self, major: i64, minor: i64, patch: i64) -> bool {
         let info = self.server_info();
 
-        let server_version_captures = match VERSION_RE.captures(&info.version) {
-            Some(captures) => captures,
-            None => return false,
-        };
-
-        let server_major = server_version_captures
-            .get(1)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
-
-        let server_minor = server_version_captures
-            .get(2)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
-
-        let server_patch = server_version_captures
-            .get(3)
-            .map(|m| m.as_str().parse::<i64>().unwrap())
-            .unwrap();
-
-        (server_major, server_minor, server_patch) >= (major, minor, patch)
+        server_version_at_least(&info.version, major, minor, patch)
     }
 
     /// Publish a [Message] to a given subject.
@@ -1369,4 +1353,60 @@ pub struct Statistics {
     /// Number of times connection was established.
     /// Initial connect will be counted as well, then all successful reconnects.
     pub connects: AtomicU64,
+}
+
+#[cfg(test)]
+mod server_version_tests {
+    use super::server_version_at_least;
+
+    #[test]
+    fn compares_three_numbers() {
+        assert!(server_version_at_least("2.11.4", 2, 11, 4));
+        assert!(server_version_at_least("2.11.4", 2, 8, 4));
+        assert!(server_version_at_least("3.0.0", 2, 99, 99));
+        assert!(!server_version_at_least("2.11.4", 2, 11, 5));
+        assert!(!server_version_at_least("2.11.4", 2, 12, 0));
+        assert!(!server_version_at_least("2.11.4", 3, 0, 0));
+    }
+
+    #[test]
+    fn pre_release_counts_as_its_release() {
+        assert!(server_version_at_least("2.12.0-beta.1", 2, 12, 0));
+        assert!(server_version_at_least("2.12.0+build", 2, 12, 0));
+    }
+
+    #[test]
+    fn unparsable_version_is_not_compatible() {
+        // These used to panic: a missing component, and one that does not fit.
+        assert!(!server_version_at_least("2", 2, 0, 0));
+        assert!(!server_version_at_least("2.11", 2, 0, 0));
+        assert!(!server_version_at_least(
+            "99999999999999999999.0.0",
+            2,
+            0,
+            0
+        ));
+        assert!(!server_version_at_least(
+            "2.99999999999999999999.0",
+            2,
+            0,
+            0
+        ));
+        // These returned false or true before; all are refused now, as on connect.
+        assert!(!server_version_at_least("", 0, 0, 0));
+        assert!(!server_version_at_least("dev", 0, 0, 0));
+        assert!(!server_version_at_least("v2.10.0", 2, 0, 0));
+        assert!(!server_version_at_least("2.10.0.1", 2, 0, 0));
+    }
+
+    #[test]
+    fn negative_arguments_match_any_parsed_version() {
+        assert!(server_version_at_least("0.0.0", -1, 0, 0));
+        assert!(server_version_at_least(
+            "18446744073709551615.0.0",
+            i64::MAX,
+            0,
+            0
+        ));
+    }
 }
