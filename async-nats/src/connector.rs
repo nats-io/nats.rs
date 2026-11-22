@@ -396,18 +396,22 @@ fn quoted(entry: &str) -> String {
     format!("{:?}", &entry[..end])
 }
 
-/// Whether the server of an INFO with `version` sends another INFO after the first PONG,
-/// which nats-server does from 2.12.0 on. As nats-server compares versions, only the three
-/// numbers count, so a pre-release counts as its release. A version whose part before any
-/// `-` or `+` is not exactly three numbers counts as earlier.
-fn sends_info_after_first_pong(version: &str) -> bool {
+/// The three numbers of a server version, as nats-server compares versions: the part before
+/// any `-` or `+` counts, so a pre-release counts as its release. `None` when that part is
+/// not exactly three numbers.
+pub(crate) fn parse_server_version(version: &str) -> Option<(u64, u64, u64)> {
     let core = version.split(['-', '+']).next().unwrap_or_default();
     let mut parts = core.split('.').map(str::parse::<u64>);
-    matches!(
-        (parts.next(), parts.next(), parts.next(), parts.next()),
-        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None)
-            if (major, minor, patch) >= (2, 12, 0)
-    )
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) => Some((major, minor, patch)),
+        _ => None,
+    }
+}
+
+/// Whether the server of an INFO with `version` sends another INFO after the first PONG,
+/// which nats-server does from 2.12.0 on. A version that does not parse counts as earlier.
+fn sends_info_after_first_pong(version: &str) -> bool {
+    parse_server_version(version).is_some_and(|version| version >= (2, 12, 0))
 }
 
 /// Reads the next operation of an attempt after CONNECT. A PING is answered and `+OK` is
