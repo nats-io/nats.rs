@@ -63,6 +63,31 @@ The client asks for TLS when any of these is set: `require_tls(true)`, `tls_firs
 TLS, servers discovered from the cluster and reconnects included, and a `ws://` URL is refused.
 `tls_optional()` opts out and leaves TLS to each server. See [`ConnectOptions`](https://docs.rs/async-nats/latest/async_nats/struct.ConnectOptions.html).
 
+##### Root certificates (`native-certs`)
+
+Servers are verified with the platform's root certificates, loaded by the `native-certs` feature
+(on by default, through `rustls-native-certs`). Root certificates (`add_root_certificates()`) or a
+rustls client config (`tls_client_config()`) replace them. Without `native-certs` there is no
+fallback. When a setting or URL asks for TLS and neither is given, connect is refused before any
+attempt, with `ConnectErrorKind::Configuration`. TLS nothing asked for, from a server that
+requires it or from a `tls://` or `wss://` URL under `tls_optional()`, fails its attempts with
+`ConnectErrorKind::Tls`. Both errors name the feature. Turning it off also leaves out
+`Security.framework` on macOS, which a cross-compile to macOS without the macOS SDK cannot link.
+A config with the Mozilla roots of the `webpki-roots` crate:
+
+```rust
+let roots = async_nats::rustls::RootCertStore::from_iter(
+    webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+);
+let config = async_nats::rustls::ClientConfig::builder()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+let client = async_nats::ConnectOptions::new()
+    .tls_client_config(config)
+    .connect("tls://demo.nats.io")
+    .await?;
+```
+
 ---
 
 #### Client and Orbit

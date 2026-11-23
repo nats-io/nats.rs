@@ -1251,8 +1251,10 @@ pub enum ConnectErrorKind {
     Io,
     /// Reached the maximum number of reconnects.
     MaxReconnects,
-    /// Options that cannot be combined, or a server URL this build or the client's
-    /// settings cannot connect to. Returned before any connection attempt, also with
+    /// Options that cannot be combined, a server URL this build or the client's
+    /// settings cannot connect to, or TLS asked for in a build without the `native-certs`
+    /// feature while neither root certificates nor a rustls client config are given.
+    /// Returned before any connection attempt, also with
     /// [`ConnectOptions::retry_on_initial_connect`], and never retried.
     Configuration,
 }

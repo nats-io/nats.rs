@@ -973,8 +973,10 @@ impl Client {
     ///
     /// The pool is checked as the server list at connect is. When the client asks for TLS,
     /// or would with the new pool, a `ws://` URL is refused with
-    /// [`SetServerPoolErrorKind::Configuration`]; the pool and whether the client asks for
-    /// TLS are left as they were.
+    /// [`SetServerPoolErrorKind::Configuration`], and so is a pool that asks for TLS in a
+    /// build without the `native-certs` feature while neither root certificates nor a
+    /// rustls client config are given; the pool and whether the client asks for TLS are left
+    /// as they were.
     ///
     /// # Examples
     /// ```no_run
@@ -1199,8 +1201,9 @@ pub enum SetServerPoolErrorKind {
     /// The server pool cannot be empty.
     EmptyPool,
     /// The pool holds a server URL this build or the client's settings cannot connect
-    /// to, as [`ConnectErrorKind::Configuration`](crate::ConnectErrorKind::Configuration)
-    /// would refuse it at connect. The pool is unchanged.
+    /// to, or asks for TLS this build has no root certificates for, as
+    /// [`ConnectErrorKind::Configuration`](crate::ConnectErrorKind::Configuration) would
+    /// refuse it at connect. The pool is unchanged.
     Configuration,
 }
 

@@ -13,6 +13,7 @@ FEATURES=(
   "nuid"
   "crypto"
   "websockets"
+  "native-certs"
   "server_2_10"
   "server_2_11"
   "server_2_12"

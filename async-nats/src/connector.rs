@@ -308,6 +308,28 @@ fn refused_url<'a>(
     ))
 }
 
+/// The configuration error for TLS that `tls_asked_by` asks for in a build without the
+/// `native-certs` feature, when the user gave neither root certificates nor a rustls client
+/// config: no attempt could verify a server. The server list at connect and a pool given
+/// later are checked alike.
+#[cfg(not(feature = "native-certs"))]
+fn refused_tls(options: &ConnectorOptions, tls_asked_by: Option<&str>) -> Option<String> {
+    let asked_by = tls_asked_by?;
+    tls::needs_platform_roots(options).then(|| {
+        format!(
+            "{asked_by} asks for TLS, but there are no root certificates to verify servers \
+             with; {}",
+            tls::NO_ROOTS_WAY_OUT
+        )
+    })
+}
+
+/// With the `native-certs` feature the platform's roots are always there to fall back on.
+#[cfg(feature = "native-certs")]
+fn refused_tls(_options: &ConnectorOptions, _tls_asked_by: Option<&str>) -> Option<String> {
+    None
+}
+
 /// The address of a `connect_urls` entry learned on a WebSocket connection, or on a TCP
 /// connection, or why the entry is skipped. The address has the scheme of that transport,
 /// `ws` or `nats`; whether it gets TLS is not the scheme's to say.
@@ -494,7 +516,9 @@ impl Connector {
         if let Some(message) = refused_url(
             tls_asked_by.as_deref(),
             servers.iter().map(|server| &server.addr),
-        ) {
+        )
+        .or_else(|| refused_tls(&options, tls_asked_by.as_deref()))
+        {
             return Err(ConnectError::with_source(
                 ConnectErrorKind::Configuration,
                 message,
@@ -565,7 +589,9 @@ impl Connector {
                     .into()
                 })
         });
-        if let Some(message) = refused_url(tls_asked_by.as_deref(), addrs.iter()) {
+        if let Some(message) = refused_url(tls_asked_by.as_deref(), addrs.iter())
+            .or_else(|| refused_tls(&self.options, tls_asked_by.as_deref()))
+        {
             return Err(SetServerPoolError::with_source(
                 SetServerPoolErrorKind::Configuration,
                 message,
@@ -1099,6 +1125,20 @@ impl Connector {
                 ),
             )
         })?;
+        // TLS a setting or URL asks for is refused at connect without roots (refused_tls);
+        // this is TLS nothing asked for: a server that requires it, or a tls:// or wss:// URL
+        // under tls_optional().
+        #[cfg(not(feature = "native-certs"))]
+        if tls::needs_platform_roots(&self.options) {
+            return Err(ConnectError::with_source(
+                crate::ConnectErrorKind::Tls,
+                format!(
+                    "{:?}: no root certificates to verify the server with; {}",
+                    without_user_info(server_addr),
+                    tls::NO_ROOTS_WAY_OUT
+                ),
+            ));
+        }
         tracing::debug!("upgrading connection to TLS");
         let tls_config = Arc::new(
             tls::config_tls(&self.options)
@@ -1533,6 +1573,22 @@ impl Connector {
 mod tests {
     use super::*;
 
+    // Without `native-certs` and without roots of the user's, config_tls has no roots to build
+    // a config from. The connector refuses before it gets there; this is the last line.
+    #[cfg(not(feature = "native-certs"))]
+    #[tokio::test]
+    async fn config_tls_without_roots_names_the_feature() {
+        let err = tls::config_tls(&options()).await.unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "no root certificates to verify the server with; {}",
+                tls::NO_ROOTS_WAY_OUT
+            )
+        );
+    }
+
     fn options() -> ConnectorOptions {
         ConnectorOptions {
             tls_required: false,
@@ -1842,6 +1898,8 @@ mod tests {
         );
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_server_given_in_a_pool_is_verified_as_configured() {
         // Under tls_optional, a server learned over TLS and then given in a pool as nats://
@@ -1881,6 +1939,8 @@ mod tests {
         }
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_pool_made_from_the_listed_pool_keeps_the_state_of_each_server() {
         let seed = addr("nats://seed.example.com:4222");
@@ -1932,6 +1992,8 @@ mod tests {
         );
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_server_given_in_a_pool_keeps_the_tls_it_was_learned_with() {
         let seed = addr("nats://seed.example.com:4222");
@@ -1977,6 +2039,8 @@ mod tests {
         assert!(!connector.learned_over_tls(&with_tls));
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn quotes_the_pool_url_that_asks_for_tls_cut_at_256_bytes() {
         // The host of a server learned over TLS, which the pool lists as tls://, is one the
@@ -2015,6 +2079,8 @@ mod tests {
         assert!(!connector.learned_over_tls(&ws));
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn an_entry_for_a_known_server_adds_nothing() {
         // A configured URL without a port counts with the port it is dialed on.
@@ -2047,6 +2113,8 @@ mod tests {
         assert!(!connector.learned_over_tls(&seed));
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_server_the_pool_left_out_lends_no_name_to_what_it_lists() {
         // A connection without TLS to the configured server lists a host name, and the
@@ -2114,6 +2182,8 @@ mod tests {
         connector.tls_name(&addr(url)).map(str::to_owned)
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_server_learned_over_tls_is_verified_against_the_name_it_was_learned_under() {
         let mut connector = connector(&["tls://nats.example.com:4222"], options());
@@ -2210,6 +2280,8 @@ mod tests {
         );
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_discovered_server_without_a_name_is_skipped() {
         let mut connector = connector(&["tls://10.0.0.1:4222"], options());
@@ -2235,6 +2307,7 @@ mod tests {
 
     /// A connector configured with `seed` that learned, over TLS from `seed`, an IP address
     /// and a host name, and without TLS from `seed` another host name.
+    #[cfg(feature = "native-certs")]
     fn connector_with_discovered_servers(seed: &str, options: ConnectorOptions) -> Connector {
         let mut connector = connector(&[seed], options);
         let seed = addr(seed);
@@ -2247,6 +2320,8 @@ mod tests {
         connector
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn tls_server_name_overrides_every_name() {
         for seed in ["tls://nats.example.com:4222", "tls://10.0.0.1:4222"] {
@@ -2273,6 +2348,8 @@ mod tests {
         }
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn verify_discovered_servers_by_ip_verifies_a_discovered_ip_against_itself() {
         for seed in ["tls://nats.example.com:4222", "tls://10.0.0.1:4222"] {
@@ -2316,6 +2393,7 @@ mod tests {
     }
 
     /// Log lines written while it runs.
+    #[cfg(feature = "native-certs")]
     fn logs_of(run: impl FnOnce()) -> String {
         #[derive(Clone, Default)]
         struct Logs(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -2339,6 +2417,8 @@ mod tests {
         text
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn cuts_the_url_in_the_warning_for_a_skipped_server() {
         // A host name learned without TLS while the client asks for TLS, as after a pool
@@ -2365,6 +2445,8 @@ mod tests {
         assert!(!logs.contains(&url), "{logs}");
     }
 
+    // TLS without roots of its own, which a build without `native-certs` refuses.
+    #[cfg(feature = "native-certs")]
     #[test]
     fn a_failed_name_check_names_the_expected_and_presented_names() {
         const NAME_SETTING: &str =
