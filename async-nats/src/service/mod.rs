@@ -459,6 +459,7 @@ impl Service {
             value.processing_time = Duration::default();
             value.requests = 0;
             value.average_processing_time = Duration::default();
+            value.last_error = None;
         }
     }
 
