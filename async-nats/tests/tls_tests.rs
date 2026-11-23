@@ -19,18 +19,37 @@ mod client {
     #[tokio::test]
     async fn basic_tls() {
         let server = nats_server::run_server("tests/configs/tls.conf");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-        // Should fail without certs.
-        assert!(async_nats::connect(&server.client_url()).await.is_err());
+        // Should fail without a client certificate. The root is given, so that this fails on
+        // the client certificate with or without the platform's roots (`native-certs`). One
+        // address, verified as localhost: with every address failing, the error would be the
+        // last one's, which depends on the resolver's order.
+        let err =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .tls_server_name("localhost")
+                .connect(format!("tls://127.0.0.1:{}", server.client_port()))
+                .await
+                .unwrap_err();
+        assert!(err.to_string().contains("CertificateRequired"), "{err}");
 
         // Should fail with IP (cert doesn't have proper SAN entry)
-        assert!(
-            async_nats::connect(format!("tls://127.0.0.1:{}", server.client_port()))
+        let err =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
+                .add_client_certificate(
+                    path.join("tests/configs/certs/client-cert.pem"),
+                    path.join("tests/configs/certs/client-key.pem"),
+                )
+                .connect(format!("tls://127.0.0.1:{}", server.client_port()))
                 .await
-                .is_err()
+                .unwrap_err();
+        assert_eq!(err.kind(), async_nats::ConnectErrorKind::Tls, "{err}");
+        assert!(
+            err.to_string().contains("is not valid for \"127.0.0.1\""),
+            "{err}"
         );
-
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
         async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
             .add_root_certificates(path.join("tests/configs/certs/rootCA.pem"))
@@ -60,13 +79,30 @@ mod client {
     #[tokio::test]
     async fn unknown_server_ca() {
         let server = nats_server::run_server("tests/configs/tls.conf");
-        assert!(async_nats::connect(&server.client_url()).await.is_err());
 
-        async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
-            .require_tls(true)
-            .connect(server.client_url())
-            .await
-            .unwrap_err();
+        // The platform's roots do not hold the test CA.
+        #[cfg(feature = "native-certs")]
+        {
+            assert!(async_nats::connect(&server.client_url()).await.is_err());
+
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .require_tls(true)
+                .connect(server.client_url())
+                .await
+                .unwrap_err();
+        }
+
+        // Nor does a root that did not sign the server's certificate. One address, verified
+        // as localhost, as in basic_tls.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let err =
+            async_nats::ConnectOptions::with_user_and_password("derek".into(), "porkchop".into())
+                .add_root_certificates(path.join("tests/configs/certs/ip-ca.pem"))
+                .tls_server_name("localhost")
+                .connect(format!("tls://127.0.0.1:{}", server.client_port()))
+                .await
+                .unwrap_err();
+        assert!(err.to_string().contains("UnknownIssuer"), "{err}");
     }
 
     #[tokio::test]
@@ -113,6 +149,7 @@ mod client {
         assert!(subscribe.next().await.is_some());
     }
 
+    #[cfg(feature = "native-certs")]
     #[tokio::test]
     async fn tls_with_native_certs() {
         let client = async_nats::ConnectOptions::new()

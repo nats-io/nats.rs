@@ -23,8 +23,9 @@ cargo check --no-default-features --features service,ring
 cargo check --no-default-features --features kv,ring
 # JetStream + Object Store
 cargo check --no-default-features --features object-store,ring
-# Full stack without server flags
+# Full stack without server flags, without and with the platform's roots
 cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,ring
+cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,native-certs,ring
 # chrono backend
 cargo check --no-default-features --features jetstream,kv,object-store,service,nkeys,crypto,websockets,chrono,ring
 # chrono without jetstream/service (dead-code guard for the chrono rfc3339 adapter)
@@ -39,6 +40,9 @@ cargo check --no-default-features --features jetstream,kv,service,nkeys,aws-lc-r
 cargo check --no-default-features --features aws-lc-rs
 # FIPS mode (implies aws-lc-rs)
 cargo check --no-default-features --features fips
+# The platform's roots with aws-lc-rs and FIPS
+cargo check --no-default-features --features native-certs,aws-lc-rs
+cargo check --no-default-features --features native-certs,fips
 
 echo ""
 echo "=== Strategy 4: Test server version flags ==="

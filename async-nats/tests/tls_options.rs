@@ -320,6 +320,8 @@ mod tls_options {
                 "root certificates",
                 ConnectOptions::new().add_root_certificates(certs("rootCA.pem")),
             ),
+            // A client certificate brings no roots: it relies on the platform roots.
+            #[cfg(feature = "native-certs")]
             (
                 "client certificate",
                 ConnectOptions::new()
@@ -346,6 +348,8 @@ mod tls_options {
 
     // One `tls://` URL asks for TLS for the whole list: the `nats://` URL next to it is
     // connected to with TLS as well.
+    // A tls:// URL alone brings no roots: it relies on the platform roots of `native-certs`.
+    #[cfg(feature = "native-certs")]
     #[tokio::test]
     async fn tls_url_uses_tls_for_the_whole_list() {
         let (port, mut canary) = canary_offering_tls().await;
@@ -649,6 +653,8 @@ mod tls_options {
     // A tls:// URL in a pool given after connect asks for TLS, as it does at connect. The
     // current connection stays up; from the next attempt on, the nats:// URL next to it is
     // connected to with TLS too.
+    // A tls:// URL alone brings no roots: it relies on the platform roots of `native-certs`.
+    #[cfg(feature = "native-certs")]
     #[tokio::test]
     async fn set_server_pool_with_a_tls_url_uses_tls_for_the_whole_pool() {
         let server = nats_server::run_basic_server();
@@ -677,6 +683,8 @@ mod tls_options {
     }
 
     // Once a pool has asked for TLS, a later pool without a tls:// URL does not turn it off.
+    // A tls:// URL alone brings no roots: it relies on the platform roots of `native-certs`.
+    #[cfg(feature = "native-certs")]
     #[tokio::test]
     async fn set_server_pool_without_a_tls_url_keeps_tls() {
         let server = nats_server::run_basic_server();
@@ -807,10 +815,15 @@ mod tls_options {
     #[tokio::test]
     async fn server_without_tls_names_the_setting_that_asked_for_it() {
         const WAY_OUT: &str = "tls_optional() leaves TLS to each server";
+        // Roots are given where the setting named stays the same, so that these cases run
+        // without `native-certs` too; the client certificate alone relies on the platform's,
+        // and without `native-certs` is refused at connect (tests/root_certificates.rs).
         for (scheme, options, expected) in [
             (
                 "nats",
-                ConnectOptions::new().require_tls(true),
+                ConnectOptions::new()
+                    .require_tls(true)
+                    .add_root_certificates(certs("rootCA.pem")),
                 format!(
                     "require_tls(true) asks for TLS, but {{server}} does not offer it; {WAY_OUT}"
                 ),
@@ -823,6 +836,7 @@ mod tls_options {
                      {WAY_OUT}"
                 ),
             ),
+            #[cfg(feature = "native-certs")]
             (
                 "nats",
                 ConnectOptions::new()
@@ -841,7 +855,7 @@ mod tls_options {
             ),
             (
                 "tls",
-                ConnectOptions::new(),
+                ConnectOptions::new().add_root_certificates(certs("rootCA.pem")),
                 "the URL {server} asks for TLS, but {server} does not offer it".to_string(),
             ),
             (
@@ -874,6 +888,8 @@ mod tls_options {
     // In a list that mixes tls:// and nats:// URLs, the error for the nats:// server
     // without TLS names that server, the URL that asked for TLS and the way out, both URLs
     // without their user info.
+    // A tls:// URL alone brings no roots: it relies on the platform roots of `native-certs`.
+    #[cfg(feature = "native-certs")]
     #[tokio::test]
     async fn mixed_list_names_the_server_the_tls_url_and_the_way_out() {
         let (port, _canary) = canary().await;

@@ -566,6 +566,9 @@ impl ConnectOptions {
     /// Asks for TLS: every server is then connected to with TLS, as with
     /// [`ConnectOptions::require_tls`].
     ///
+    /// These roots replace the platform's: with root certificates given, the roots of the
+    /// `native-certs` feature are not loaded.
+    ///
     /// # Examples
     /// ```no_run
     /// # #[tokio::main]
@@ -1105,6 +1108,11 @@ impl ConnectOptions {
     ///
     /// Asks for TLS: every server is then connected to with TLS, as with
     /// [`ConnectOptions::require_tls`].
+    ///
+    /// The config verifies servers on its own: neither the platform's roots of the
+    /// `native-certs` feature nor the roots of [`ConnectOptions::add_root_certificates`] are
+    /// added to it. The example below builds it from the platform's roots, with the
+    /// rustls-native-certs crate.
     ///
     /// # Examples
     /// ```

@@ -164,19 +164,52 @@ jobs:
             echo "websocket dependencies must not be locked when websockets are disabled" >&2
             exit 1
           fi
+      - name: Check the lockfile without native-certs (${{ matrix.tls_feature }})
+        shell: bash
+        run: |
+          consumer_dir=$(mktemp -d)
+          trap 'rm -rf "$consumer_dir"' EXIT
+          mkdir "$consumer_dir/src"
+          touch "$consumer_dir/src/lib.rs"
+          # Every feature except `native-certs` and the other providers, `websockets` included,
+          # so that a dependency or feature pulling in the platform's root store from any of
+          # them shows up here. Without it, nothing that links Security.framework or
+          # CoreFoundation on macOS is locked, and a cross-compile to macOS needs no macOS SDK
+          # (#1695).
+          cat > "$consumer_dir/Cargo.toml" <<EOF
+          [package]
+          name = "async-nats-lockfile-check"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          async-nats = { path = "$GITHUB_WORKSPACE/async-nats", default-features = false, features = ["jetstream", "kv", "object-store", "service", "chrono", "crypto", "nkeys", "nuid", "websockets", "experimental", "server_2_10", "server_2_11", "server_2_12", "server_2_14", "${{ matrix.tls_feature }}"] }
+          EOF
+          cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
+          if grep -E '^name = "(rustls-native-certs|security-framework(-sys)?|core-foundation(-sys)?)"$' "$consumer_dir/Cargo.lock"; then
+            echo "platform root store dependencies must not be locked when native-certs is disabled" >&2
+            exit 1
+          fi
       - name: Run the TLS tests with ${{ matrix.tls_feature }}
         env:
           RUST_BACKTRACE: 1
         # The binaries that exercise the TLS backend, named, so that a test is run by what
         # it covers and not by whether "tls" occurs in its name.
         run: |
-          cargo test --test tls_options --test tls_tests --test websocket_test --test discovered_servers --test info_handling --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }},server_2_12 -- --nocapture
+          cargo test --test tls_options --test tls_tests --test websocket_test --test discovered_servers --test info_handling --test root_certificates --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,native-certs,${{ matrix.tls_feature }},server_2_12 -- --nocapture
+      - name: Run the TLS tests with ${{ matrix.tls_feature }} without native-certs
+        env:
+          RUST_BACKTRACE: 1
+        # Without the platform's roots: the tests that need them are left out, and
+        # root_certificates checks the error for TLS without roots.
+        run: |
+          cargo test --lib --test tls_options --test tls_tests --test websocket_test --test discovered_servers --test info_handling --test root_certificates --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }},server_2_12 -- --nocapture
       - name: Run the unit and TLS option tests without websockets
         if: matrix.tls_feature == 'ring'
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --lib --test tls_options --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,ring -- --nocapture
+          cargo test --lib --test tls_options --test root_certificates --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,native-certs,ring -- --nocapture
 
   server_2_11_tests:
     defaults:
@@ -212,7 +245,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          cargo test --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,ring,server_2_10,server_2_11
+          cargo test --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,native-certs,ring,server_2_10,server_2_11
 
   check_format:
     name: check format (ubuntu-latest / nightly)
@@ -255,6 +288,9 @@ jobs:
       # whose mutually-exclusive cfg arm is otherwise never clippy-checked.
       - name: Run linter (default/time backend)
         run: cargo clippy --benches --tests --examples -- --deny clippy::all
+      # Both of the above enable `native-certs`; lint the arm without the platform's roots too.
+      - name: Run linter (without native-certs)
+        run: cargo clippy --benches --tests --examples --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,ring,server_2_10,server_2_11,server_2_12,server_2_14 -- --deny clippy::all
       # Guard the chrono-without-jetstream/service combinations: the hand-written chrono
       # rfc3339 adapter is unused there, which must not regress into a dead-code error
       # under `-D warnings` (set at the workflow env level).
