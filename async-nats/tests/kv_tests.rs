@@ -1652,6 +1652,63 @@ mod kv {
 
     #[cfg(feature = "server_2_11")]
     #[tokio::test]
+    async fn create_with_ttl_after_delete_purge_and_expiry() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = ConnectOptions::new()
+            .connect(server.client_url())
+            .await
+            .unwrap();
+
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: "ttl_recreate".into(),
+                history: 1,
+                storage: StorageType::File,
+                num_replicas: 1,
+                limit_markers: Some(Duration::from_secs(60)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // a key whose last entry is a delete marker
+        kv.put("deleted", "value".into()).await.unwrap();
+        kv.delete("deleted").await.unwrap();
+
+        // a key whose last entry is a purge marker
+        kv.put("purged", "value".into()).await.unwrap();
+        kv.purge("purged").await.unwrap();
+
+        // a key whose last entry is the marker its own TTL left
+        kv.create_with_ttl("expired", "value".into(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert!(kv.get("expired").await.unwrap().is_none());
+
+        // creating each again must keep the TTL, as creating a fresh key does
+        for key in ["deleted", "purged", "expired"] {
+            kv.create_with_ttl(key, "value".into(), Duration::from_secs(1))
+                .await
+                .unwrap();
+        }
+
+        for key in ["deleted", "purged", "expired"] {
+            assert!(kv.get(key).await.unwrap().is_some(), "{key} should exist");
+        }
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        for key in ["deleted", "purged", "expired"] {
+            assert!(
+                kv.get(key).await.unwrap().is_none(),
+                "{key} should be expired"
+            );
+        }
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
     async fn purge_with_ttl() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = ConnectOptions::new()
