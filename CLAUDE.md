@@ -174,7 +174,7 @@ default = ["server_2_10", "server_2_11", "server_2_12", "service", "ring",
            "jetstream", "nkeys", "crypto", "object-store", "kv", "websockets", "nuid"]
 
 # Subsystems (each gates a module)
-jetstream       # JetStream API — pulls in time, serde_nanos, tryhard, base64
+jetstream       # JetStream API — pulls in time, serde_nanos, base64
 kv              # Key-Value store (requires jetstream)
 object-store    # Object store (requires jetstream + crypto)
 service         # Service API — pulls in time, serde_nanos
