@@ -32,7 +32,19 @@ mod client {
                 .connect(format!("tls://127.0.0.1:{}", server.client_port()))
                 .await
                 .unwrap_err();
-        assert!(err.to_string().contains("CertificateRequired"), "{err}");
+        // The server sends the CertificateRequired alert and closes the connection. If the
+        // client's CONNECT is still unread then, or arrives after the close, the connection is
+        // reset, and Windows can drop the alert the client has not read yet when the reset
+        // arrives. There the error can be the reset (os error 10054) instead.
+        let reset_on_windows = cfg!(windows)
+            && err.kind() == async_nats::ConnectErrorKind::Io
+            && std::error::Error::source(&err)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .is_some_and(|source| source.kind() == std::io::ErrorKind::ConnectionReset);
+        assert!(
+            reset_on_windows || err.to_string().contains("CertificateRequired"),
+            "{err}"
+        );
 
         // Should fail with IP (cert doesn't have proper SAN entry)
         let err =
