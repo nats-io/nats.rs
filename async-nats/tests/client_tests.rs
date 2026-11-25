@@ -1660,6 +1660,30 @@ mod client {
             .await
             .expect_err("publish_with_reply should reject reply subject with spaces");
 
+        // raw OutboundMessage paths must reject a spaced reply too, otherwise the
+        // server parses "two" as the reply in `PUB test.one two`
+        let outbound = |subject: &str, reply: Option<&str>| async_nats::message::OutboundMessage {
+            subject: async_nats::Subject::from(subject),
+            reply: reply.map(async_nats::Subject::from),
+            payload: "data".into(),
+            headers: None,
+        };
+        client
+            .publish_message(outbound("test.one", Some("two three")))
+            .await
+            .expect_err("publish_message should reject reply subject with spaces");
+        client
+            .publish_message(outbound("test.one two", None))
+            .await
+            .expect_err("publish_message should reject subject with spaces");
+        {
+            use futures_util::SinkExt;
+            let mut sink = client.clone();
+            sink.send(outbound("test.one", Some("two three")))
+                .await
+                .expect_err("Sink send should reject reply subject with spaces");
+        }
+
         // request should also reject a subject with spaces
         let err = client
             .request("bad subject", "data".into())
