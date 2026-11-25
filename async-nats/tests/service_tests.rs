@@ -120,6 +120,16 @@ mod service {
         let endpoint_stats = info.endpoints.pop().unwrap();
         assert_eq!(metadata, info.metadata);
         assert_eq!(endpoint_stats.metadata, endpoint_metadata);
+
+        let stats: serde_json::Value = serde_json::from_slice(
+            &client
+                .request("$SRV.STATS", "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+        assert_eq!(serde_json::json!(metadata), stats["metadata"]);
         //TODO: test rest of fields
     }
 
