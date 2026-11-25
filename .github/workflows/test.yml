@@ -204,6 +204,14 @@ jobs:
         # root_certificates checks the error for TLS without roots.
         run: |
           cargo test --lib --test tls_options --test tls_tests --test websocket_test --test discovered_servers --test info_handling --test root_certificates --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,${{ matrix.tls_feature }},server_2_12 -- --nocapture
+      - name: Connect with both TLS backends built in and no default provider installed
+        if: matrix.tls_feature == 'ring'
+        env:
+          RUST_BACKTRACE: 1
+        # Feature unification builds both backends whenever two crates of one dependency
+        # graph ask for one each, and rustls then cannot choose a provider by itself.
+        run: |
+          cargo test --test crypto_provider --no-default-features --features jetstream,kv,object-store,service,nkeys,nuid,crypto,websockets,native-certs,ring,aws-lc-rs,server_2_12 -- --nocapture
       - name: Run the unit and TLS option tests without websockets
         if: matrix.tls_feature == 'ring'
         env:

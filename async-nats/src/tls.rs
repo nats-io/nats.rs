@@ -17,7 +17,9 @@ use crate::tls;
 use rustls_pki_types::pem::PemObject;
 use std::io::{self, BufReader, ErrorKind};
 use std::path::PathBuf;
-use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+use std::sync::Arc;
+use tokio_rustls::rustls::crypto::CryptoProvider;
+use tokio_rustls::rustls::{ClientConfig, ConfigBuilder, RootCertStore, WantsVerifier};
 
 /// Loads client certificates from a `.pem` file.
 /// If the pem file is found, but does not contain any certificates, it will return
@@ -126,7 +128,7 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientC
                     })?;
                 root_store.extend(trust_anchors);
             }
-            let builder = ClientConfig::builder().with_root_certificates(root_store);
+            let builder = builder()?.with_root_certificates(root_store);
             if let Some(cert) = options.client_cert.clone() {
                 if let Some(key) = options.client_key.clone() {
                     let key = tls::load_key(key).await?;
@@ -144,4 +146,29 @@ pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientC
         }
     }?;
     Ok(tls_config)
+}
+
+/// Starts a client config on the process default provider, or on the one this crate's
+/// features build in when the process installed none, so connecting never needs a global.
+fn builder() -> io::Result<ConfigBuilder<ClientConfig, WantsVerifier>> {
+    match CryptoProvider::get_default().cloned().or_else(built_in) {
+        Some(provider) => ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(io::Error::other),
+        None => Ok(ClientConfig::builder()),
+    }
+}
+
+/// The provider this crate's features build in, aws-lc-rs first when both are.
+#[allow(unreachable_code)]
+fn built_in() -> Option<Arc<CryptoProvider>> {
+    #[cfg(feature = "aws-lc-rs")]
+    return Some(Arc::new(
+        tokio_rustls::rustls::crypto::aws_lc_rs::default_provider(),
+    ));
+    #[cfg(feature = "ring")]
+    return Some(Arc::new(
+        tokio_rustls::rustls::crypto::ring::default_provider(),
+    ));
+    None
 }
