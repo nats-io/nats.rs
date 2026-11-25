@@ -466,10 +466,14 @@ struct Subscription {
 /// * An abandoned request is freed within a ping interval. Before that, `senders` never exceeds
 ///   `prune_at`, so abandoned requests cannot outnumber [`MULTIPLEXER_PRUNE_MIN`] or twice the
 ///   smallest size of `senders` since the last prune.
-/// * A prune triggered by an insert visits `prune_at` senders, and at least half of them were
-///   inserted after `senders` was at its smallest. Each insert thus pays for at most two visits:
-///   amortized O(1). Requests and replies only add a few integer operations; checking whether
-///   receivers are closed is left to the prune.
+/// * A prune triggered by an insert finds `prune_at` senders, and at least half of them were
+///   inserted after `senders` was at its smallest. It walks the whole table, though, so its cost
+///   follows the capacity of `senders` rather than `prune_at`. While the capacity stays within a
+///   few times `prune_at`, each insert thus pays for a few visits: amortized O(1). After a burst
+///   whose replies arrived, the capacity can stay many times `prune_at` until the next periodic
+///   prune gives it back, and until then each prune triggered by an insert walks all of it.
+///   Requests and replies only add a few integer operations; checking whether receivers are
+///   closed is left to the prune.
 /// * A single prune still visits every sender, and stalls the connection handler about as long as
 ///   growing the map to that size when its senders are pending, and a few times longer when most
 ///   were abandoned and must be freed: 10 to 20 ms for 100,000 abandoned senders, and up to 180 ms
