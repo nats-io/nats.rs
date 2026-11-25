@@ -294,7 +294,9 @@ mod service {
         assert!(service
             .stats()
             .await
-            .get("products")
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.name == "products")
             .unwrap()
             .last_error
             .is_some());
@@ -505,7 +507,9 @@ mod service {
         let standard_service_stats = standard_service.stats().await;
         assert_eq!(
             standard_service_stats
-                .get("group.grouped")
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.subject == "group.grouped")
                 .unwrap()
                 .queue_group,
             "group_custom"
@@ -513,7 +517,9 @@ mod service {
         let custom_service_stats = service_with_custom_queue.stats().await;
         assert_eq!(
             custom_service_stats
-                .get("group.grouped")
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.subject == "group.grouped")
                 .unwrap()
                 .queue_group,
             "another_group"
@@ -622,6 +628,43 @@ mod service {
 
         assert_eq!(&endpoint_info, info.endpoints.first().unwrap());
         assert_eq!(vec![endpoint_info], service.info().await.endpoints);
+    }
+
+    #[tokio::test]
+    async fn stats() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let service = client
+            .service_builder()
+            .start("orders", "1.0.0")
+            .await
+            .unwrap();
+        let mut endpoint = service.endpoint("add").await.unwrap();
+
+        for _ in 0..2 {
+            client
+                .publish_with_reply("add", client.new_inbox(), "".into())
+                .await
+                .unwrap();
+            let request = endpoint.next().await.unwrap();
+            request.respond(Ok("".into())).await.unwrap();
+        }
+
+        let response: serde_json::Value = serde_json::from_slice(
+            &client
+                .request("$SRV.STATS.orders", "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+
+        assert_eq!(2, response["endpoints"][0]["num_requests"]);
+        assert_eq!(
+            response,
+            serde_json::to_value(service.stats().await).unwrap()
+        );
     }
 
     #[tokio::test]

@@ -78,7 +78,7 @@ pub struct PingResponse {
 }
 
 /// Response for `STATS` requests.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Stats {
     /// Response type.
     #[serde(rename = "type")]
@@ -325,6 +325,7 @@ impl ServiceExt for Client {
 pub struct Service {
     endpoints_state: Arc<Mutex<Endpoints>>,
     info: Info,
+    started: DateTime,
     client: Client,
     handle: JoinHandle<Result<(), Error>>,
     shutdown_tx: Sender<()>,
@@ -413,15 +414,8 @@ impl Service {
                                     value.data = Some(data);
                                 }
                             }
-                            let stats = serde_json::to_vec(&Stats {
-                                kind: "io.nats.micro.v1.stats_response".to_string(),
-                                name: info.name.clone(),
-                                id: info.id.clone(),
-                                version: info.version.clone(),
-                                metadata: info.metadata.clone(),
-                                started,
-                                endpoints: endpoints_state.lock().unwrap().endpoints.values().cloned().map(Into::into).collect(),
-                            })?;
+                            let stats = stats_with_endpoints(&info, started, &endpoints_state);
+                            let stats = serde_json::to_vec(&stats)?;
                             client.publish(reply, stats.into()).await?;
                         },
                         else => break,
@@ -433,6 +427,7 @@ impl Service {
         Ok(Service {
             endpoints_state,
             info,
+            started,
             client,
             handle,
             shutdown_tx,
@@ -463,15 +458,9 @@ impl Service {
         }
     }
 
-    /// Returns [Stats] for this service instance.
-    pub async fn stats(&self) -> HashMap<String, endpoint::Stats> {
-        self.endpoints_state
-            .lock()
-            .unwrap()
-            .endpoints
-            .iter()
-            .map(|(key, value)| (key.to_owned(), value.to_owned().into()))
-            .collect()
+    /// Returns [Stats] for this service instance, as a `STATS` request would.
+    pub async fn stats(&self) -> Stats {
+        stats_with_endpoints(&self.info, self.started, &self.endpoints_state)
     }
 
     /// Returns [Info] for this service instance.
@@ -727,6 +716,30 @@ fn info_with_endpoints(info: &Info, endpoints_state: &Mutex<Endpoints>) -> Info 
     Info {
         endpoints,
         ..info.clone()
+    }
+}
+
+fn stats_with_endpoints(
+    info: &Info,
+    started: DateTime,
+    endpoints_state: &Mutex<Endpoints>,
+) -> Stats {
+    let endpoints = endpoints_state
+        .lock()
+        .unwrap()
+        .endpoints
+        .values()
+        .cloned()
+        .map(Into::into)
+        .collect();
+    Stats {
+        kind: "io.nats.micro.v1.stats_response".to_string(),
+        name: info.name.clone(),
+        id: info.id.clone(),
+        version: info.version.clone(),
+        metadata: info.metadata.clone(),
+        started,
+        endpoints,
     }
 }
 
