@@ -303,8 +303,12 @@ fn abandoned_requests_are_freed_on_reconnect() {
 
             client.force_reconnect().await.unwrap();
             let mut events = events.lock().await;
-            while events.recv().await != Some(Event::Disconnected) {}
-            while events.recv().await != Some(Event::Connected) {}
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while events.recv().await.expect("event channel closed") != Event::Disconnected {}
+                while events.recv().await.expect("event channel closed") != Event::Connected {}
+            })
+            .await
+            .expect("the client did not reconnect within 10 s");
         }
     });
 }
