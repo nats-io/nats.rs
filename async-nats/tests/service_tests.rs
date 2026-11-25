@@ -332,6 +332,67 @@ mod service {
     }
 
     #[tokio::test]
+    async fn reset() {
+        let server = nats_server::run_basic_server();
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+
+        let mut service = client
+            .service_builder()
+            .start("orders", "1.0.0")
+            .await
+            .unwrap();
+        let mut endpoint = service.endpoint("add").await.unwrap();
+
+        client
+            .publish_with_reply("add", client.new_inbox(), "".into())
+            .await
+            .unwrap();
+        client
+            .publish_with_reply("add", client.new_inbox(), "".into())
+            .await
+            .unwrap();
+        let request = endpoint.next().await.unwrap();
+        request.respond(Ok("".into())).await.unwrap();
+        let request = endpoint.next().await.unwrap();
+        request
+            .respond(Err(service::error::Error {
+                code: 500,
+                status: "failed".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let before: Stats = serde_json::from_slice(
+            &client
+                .request("$SRV.STATS.orders", "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+        assert_eq!(2, before.endpoints[0].requests);
+        assert!(before.endpoints[0].last_error.is_some());
+
+        service.reset().await;
+
+        let after: Stats = serde_json::from_slice(
+            &client
+                .request("$SRV.STATS.orders", "".into())
+                .await
+                .unwrap()
+                .payload,
+        )
+        .unwrap();
+        let stats = &after.endpoints[0];
+        assert_eq!(0, stats.requests);
+        assert_eq!(0, stats.errors);
+        assert!(stats.processing_time.is_zero());
+        assert!(stats.average_processing_time.is_zero());
+        assert!(stats.last_error.is_none());
+        assert_eq!(before.started, after.started);
+    }
+
+    #[tokio::test]
     async fn respond_error_with_line_breaks() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
