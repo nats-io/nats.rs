@@ -361,46 +361,86 @@ async fn raw_requester_explicit_none_removes_the_bound() {
     .unwrap();
 }
 
+/// Runs `op`, `what` by name, until it succeeds: for setup requests made under a context
+/// timeout set short for the test, which a loaded runner can exceed. Each attempt is bounded by
+/// `timeout`, and attempts stop after 10 seconds. An attempt that fails in under half of
+/// `timeout` did not time out, so it fails the test at once instead of being retried.
+async fn until_ok<T, E, F>(what: &str, timeout: Duration, mut op: impl FnMut() -> F) -> T
+where
+    E: std::fmt::Debug,
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let start = Instant::now();
+        let err = match tokio::time::timeout(timeout, op()).await {
+            Ok(Ok(value)) => return value,
+            Ok(Err(err)) => format!("{err:?}"),
+            Err(elapsed) => elapsed.to_string(),
+        };
+        if start.elapsed() < timeout / 2 {
+            panic!("{what} failed without timing out: {err}");
+        }
+        if Instant::now() >= deadline {
+            panic!("{what} kept timing out for 10s: {err}");
+        }
+    }
+}
+
 // A sample of every API family is bounded by the context timeout, whichever error type the
 // API maps it to. Handles are obtained while the proxy forwards, then the proxy stops
 // answering. The context timeout is set before the handles are created, since each handle
 // keeps its own copy of the context.
 #[tokio::test]
 async fn every_api_call_is_bounded() {
-    let (_server, client, mut context) = setup().await;
-    let proxy = proxy(client, Duration::ZERO).await;
-    let timeout = Duration::from_millis(200);
-    context.set_timeout(timeout);
+    let (server, client, mut context) = setup().await;
 
-    let mut stream = context
+    // What the handles refer to is created without the proxy and the context timeout: the
+    // first JetStream requests after the server starts have exceeded the 200ms below on loaded
+    // Windows runners.
+    let admin = jetstream::new(async_nats::connect(server.client_url()).await.unwrap());
+    admin
         .create_stream(stream::Config {
             name: "events".to_string(),
             subjects: vec!["events".to_string()],
             ..Default::default()
         })
         .await
-        .unwrap();
-    context
-        .publish("events", "data".into())
-        .await
         .unwrap()
-        .await
-        .unwrap();
-    let mut consumer = stream
         .create_consumer(pull::Config {
             durable_name: Some("durable".to_string()),
             ..Default::default()
         })
         .await
         .unwrap();
+    admin
+        .publish("events", "data".into())
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     #[cfg(feature = "kv")]
-    let kv = context
+    admin
         .create_key_value(jetstream::kv::Config {
             bucket: "bucket".to_string(),
             ..Default::default()
         })
         .await
         .unwrap();
+
+    let proxy = proxy(client, Duration::ZERO).await;
+    let timeout = Duration::from_millis(200);
+    context.set_timeout(timeout);
+
+    // The handles come through the proxy under the context timeout, so that each keeps it. A
+    // read that does not make it within the timeout is retried.
+    let mut stream = until_ok("get_stream", timeout, || context.get_stream("events")).await;
+    let mut consumer = until_ok("get_consumer", timeout, || {
+        stream.get_consumer::<pull::Config>("durable")
+    })
+    .await;
+    #[cfg(feature = "kv")]
+    let kv = until_ok("get_key_value", timeout, || context.get_key_value("bucket")).await;
 
     proxy.swallow.store(true, Ordering::SeqCst);
     let limit = Duration::from_secs(2);
