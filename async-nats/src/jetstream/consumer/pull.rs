@@ -514,6 +514,10 @@ impl Consumer<OrderedConfig> {
     /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
     /// sees mismatch.
     ///
+    /// If recovery interrupts a pending multi-message `LastPerSubject` snapshot,
+    /// the stream yields [OrderedErrorKind::Recreate] and ends. The server reports
+    /// the starting cursor but does not expose the individual snapshot sequences.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -561,17 +565,23 @@ impl Consumer<OrderedConfig> {
         let stream = Stream::stream(ordered_batch_config(&self.info), &config).await?;
 
         let mut recreate_config = self.config;
+        // LastPerSubject can start with a sparse set of stream sequences. ConsumerInfo
+        // exposes the first position and pending count, but not the per-subject sequence list.
+        let pending_snapshot = match recreate_config.deliver_policy {
+            DeliverPolicy::LastPerSubject if self.info.num_pending > 1 => self.info.num_pending,
+            _ => 0,
+        };
         if matches!(
             recreate_config.deliver_policy,
-            DeliverPolicy::New | DeliverPolicy::Last
+            DeliverPolicy::New | DeliverPolicy::Last | DeliverPolicy::LastPerSubject
         ) {
-            // The server has already selected the starting sequence for this consumer.
             recreate_config.deliver_policy = DeliverPolicy::ByStartSequence {
                 start_sequence: self.info.delivered.stream_sequence + 1,
             };
         }
 
         Ok(Ordered {
+            pending_snapshot,
             consumer_sequence: 0,
             stream_sequence: 0,
             missed_heartbeats: false,
@@ -764,6 +774,7 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 pub struct Ordered {
+    pending_snapshot: u64,
     context: Context,
     stream_name: String,
     consumer: OrderedConfig,
@@ -813,6 +824,7 @@ impl futures_util::Stream for Ordered {
                                 recreate = true;
                                 self.consumer_sequence = 0;
                             } else {
+                                self.pending_snapshot = self.pending_snapshot.saturating_sub(1);
                                 self.stream_sequence = info.stream_sequence;
                                 self.consumer_sequence = info.consumer_sequence;
                                 self.limit_exceeded = false;
@@ -858,6 +870,15 @@ impl futures_util::Stream for Ordered {
         }
         // Recreate consumer if needed
         if recreate {
+            if self.pending_snapshot > 0 {
+                if let Some(stream) = self.stream.as_mut() {
+                    stream.terminate();
+                }
+                return Poll::Ready(Some(Err(OrderedError::with_source(
+                    OrderedErrorKind::Recreate,
+                    "the original LastPerSubject snapshot was interrupted before all its messages were delivered",
+                ))));
+            }
             self.stream = None;
             self.serial += 1;
             let name = format!("{}_{}", self.name_prefix, self.serial);

@@ -1715,6 +1715,144 @@ mod jetstream {
         }
     }
 
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_empty() {
+        check_last_per_subject_recovery(&[], &[], 0, Ok(&[1, 2, 3])).await;
+    }
+
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_one_historical_subject() {
+        check_last_per_subject_recovery(&["events.a", "events.a"], &[2], 0, Ok(&[2, 3, 4, 5]))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_interrupted_snapshot() {
+        // Only 2 (b) and 4 (a) belong to the original snapshot. Replaying from 2
+        // would deliver the superseded message at 3 as well.
+        let subjects = ["events.a", "events.b", "events.a", "events.a"];
+        for read_before_delete in [0, 1] {
+            check_last_per_subject_recovery(
+                &subjects,
+                &[2, 4],
+                read_before_delete,
+                Err(pull::OrderedErrorKind::Recreate),
+            )
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_completed_snapshot() {
+        check_last_per_subject_recovery(
+            &["events.a", "events.b", "events.a", "events.a"],
+            &[2, 4],
+            2,
+            Ok(&[5, 6, 7]),
+        )
+        .await;
+    }
+
+    async fn check_last_per_subject_recovery(
+        initial_subjects: &[&'static str],
+        snapshot: &[u64],
+        read_before_delete: usize,
+        expected_recovery: Result<&[u64], pull::OrderedErrorKind>,
+    ) {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for &subject in initial_subjects {
+            context
+                .publish(subject, "historical".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let config = pull::OrderedConfig {
+            max_batch: 1,
+            filter_subject: "events.*".into(),
+            deliver_policy: consumer::DeliverPolicy::LastPerSubject,
+            ..Default::default()
+        };
+        let consumer = stream.create_consumer(config.clone()).await.unwrap();
+        let control = stream.create_consumer(config).await.unwrap();
+        let name = consumer.cached_info().name.clone();
+        let mut recovered = consumer.messages().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(15), async {
+            if read_before_delete > 0 {
+                for sequence in &snapshot[..read_before_delete] {
+                    let message = recovered.next().await.unwrap().unwrap();
+                    assert_eq!(message.info().unwrap().stream_sequence, *sequence);
+                }
+                stream.delete_consumer(&name).await.unwrap();
+            }
+            for _ in 0..2 {
+                context
+                    .publish("events.a", "new".into())
+                    .await
+                    .unwrap()
+                    .await
+                    .unwrap();
+            }
+            if read_before_delete == 0 {
+                assert_eq!(
+                    stream
+                        .consumer_info(&name)
+                        .await
+                        .unwrap()
+                        .delivered
+                        .consumer_sequence,
+                    0
+                );
+                stream.delete_consumer(&name).await.unwrap();
+            }
+            // A distinct end marker makes both missing deliveries and extra replays observable.
+            let end = context
+                .publish("events.end", "end".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap()
+                .sequence;
+            let mut expected = snapshot.to_vec();
+            expected.extend(initial_subjects.len() as u64 + 1..=end);
+
+            let mut uninterrupted = control.messages().await.unwrap();
+            for &sequence in &expected {
+                let message = uninterrupted.next().await.unwrap().unwrap();
+                assert_eq!(message.info().unwrap().stream_sequence, sequence);
+            }
+            match expected_recovery {
+                Ok(sequences) => {
+                    for &sequence in sequences {
+                        let message = recovered.next().await.unwrap().unwrap();
+                        assert_eq!(message.info().unwrap().stream_sequence, sequence);
+                    }
+                }
+                Err(kind) => {
+                    let error = recovered.next().await.unwrap().unwrap_err();
+                    assert_eq!(error.kind(), kind);
+                    assert!(recovered.next().await.is_none());
+                }
+            }
+        })
+        .await
+        .expect("consumer recovery timed out");
+    }
+
     // Next consumer CREATE or DELETE sent by a client with the "ORDERED" inbox
     // prefix, as (op, consumer name).
     async fn next_ordered_request(requests: &mut async_nats::Subscriber) -> (String, String) {
