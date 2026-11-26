@@ -575,7 +575,10 @@ pub(crate) struct ConnectionHandler {
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
     is_draining: bool,
-    drain_pings: VecDeque<u64>,
+    // One entry per PING in flight, holding the subscriptions it drains: the server answers
+    // PINGs in order, so a drained subscription ends at the PONG that follows its UNSUB, once
+    // every message the server routed to it before the UNSUB has arrived.
+    drain_pings: VecDeque<Vec<u64>>,
 }
 
 impl ConnectionHandler {
@@ -636,6 +639,7 @@ impl ConnectionHandler {
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
                     self.handler.connection.enqueue_write_op(&ClientOp::Ping);
+                    self.handler.drain_pings.push_back(Vec::new());
 
                     Poll::Pending
                 }
@@ -683,15 +687,9 @@ impl ConnectionHandler {
                     }
                 }
 
-                // Before handling any commands, drop any subscriptions which are draining
-                // Note: safe to assume subscription drain has completed at this point, as we would have flushed
-                // all outgoing UNSUB messages in the previous call to this fn, and we would have processed and
-                // delivered any remaining messages to the subscription in the loop above.
-                while let Some(sid) = self.handler.drain_pings.pop_front() {
-                    self.handler.subscriptions.remove(&sid);
-                }
-
-                if self.handler.is_draining {
+                if self.handler.is_draining
+                    && self.handler.drain_pings.iter().all(|sids| sids.is_empty())
+                {
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
                     // call to this fn, we handled any remaining messages from the server in the loop above, and
                     // all subs were drained, so drain is complete and we should exit instead of processing any
@@ -848,6 +846,9 @@ impl ConnectionHandler {
             ServerOp::Pong => {
                 debug!("received PONG");
                 self.pending_pings = self.pending_pings.saturating_sub(1);
+                for sid in self.drain_pings.pop_front().unwrap_or_default() {
+                    self.subscriptions.remove(&sid);
+                }
             }
             ServerOp::Error(error) => {
                 debug!("received ERROR: {:?}", error);
@@ -977,8 +978,9 @@ impl ConnectionHandler {
                 self.flush_observers.push(observer);
             }
             Command::Drain { sid } => {
+                let mut drained = Vec::new();
                 let mut drain_sub = |sid: u64| {
-                    self.drain_pings.push_back(sid);
+                    drained.push(sid);
                     self.connection
                         .enqueue_write_op(&ClientOp::Unsubscribe { sid, max: None });
                 };
@@ -996,6 +998,8 @@ impl ConnectionHandler {
                     }
                 }
                 self.connection.enqueue_write_op(&ClientOp::Ping);
+                self.pending_pings += 1;
+                self.drain_pings.push_back(drained);
             }
             Command::Subscribe {
                 sid,
@@ -1109,6 +1113,9 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
         self.pending_pings = 0;
+        for sid in self.drain_pings.drain(..).flatten() {
+            self.subscriptions.remove(&sid);
+        }
         self.connector.events_tx.try_send(Event::Disconnected).ok();
         self.connector.state_tx.send(State::Disconnected).ok();
 
