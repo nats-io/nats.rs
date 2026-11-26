@@ -1651,6 +1651,70 @@ mod jetstream {
         assert_eq!(first.payload.as_ref(), b"before-recreate");
     }
 
+    #[tokio::test]
+    async fn pull_ordered_recreate_preserves_last_start_on_an_empty_stream() {
+        assert_last_consumer_recreates_from_original_start(0).await;
+    }
+
+    #[tokio::test]
+    async fn pull_ordered_recreate_preserves_last_start_with_existing_messages() {
+        assert_last_consumer_recreates_from_original_start(2).await;
+    }
+
+    async fn assert_last_consumer_recreates_from_original_start(initial_messages: u64) {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..initial_messages {
+            context
+                .publish("events", "historical".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let consumer = stream
+            .create_consumer(pull::OrderedConfig {
+                deliver_policy: consumer::DeliverPolicy::Last,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let name = consumer.cached_info().name.clone();
+
+        for _ in 0..2 {
+            context
+                .publish("events", "before-recreate".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let status = stream.consumer_info(&name).await.unwrap();
+        assert_eq!(status.delivered.consumer_sequence, 0);
+        stream.delete_consumer(&name).await.unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        for sequence in initial_messages.max(1)..=initial_messages + 2 {
+            let message = tokio::time::timeout(Duration::from_secs(15), messages.next())
+                .await
+                .expect("no delivery after consumer reset")
+                .unwrap()
+                .unwrap();
+            assert_eq!(message.info().unwrap().stream_sequence, sequence);
+        }
+    }
+
     // Next consumer CREATE or DELETE sent by a client with the "ORDERED" inbox
     // prefix, as (op, consumer name).
     async fn next_ordered_request(requests: &mut async_nats::Subscriber) -> (String, String) {

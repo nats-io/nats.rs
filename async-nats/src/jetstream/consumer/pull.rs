@@ -561,7 +561,10 @@ impl Consumer<OrderedConfig> {
         let stream = Stream::stream(ordered_batch_config(&self.info), &config).await?;
 
         let mut recreate_config = self.config;
-        if recreate_config.deliver_policy == DeliverPolicy::New {
+        if matches!(
+            recreate_config.deliver_policy,
+            DeliverPolicy::New | DeliverPolicy::Last
+        ) {
             // The server has already selected the starting sequence for this consumer.
             recreate_config.deliver_policy = DeliverPolicy::ByStartSequence {
                 start_sequence: self.info.delivered.stream_sequence + 1,
