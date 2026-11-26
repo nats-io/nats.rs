@@ -1589,6 +1589,54 @@ mod tests {
         );
     }
 
+    // Loading the platform's roots reads files or the keychain, on every connect attempt. It
+    // must not stall the runtime: a task on a current-thread runtime keeps running while a
+    // stand-in that takes a second loads them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn config_tls_loads_the_platform_roots_off_the_runtime_thread() {
+        use std::time::Instant;
+
+        const LOAD: Duration = Duration::from_secs(1);
+
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let ticker = tokio::spawn(async move {
+            let mut longest_gap = Duration::ZERO;
+            let mut last = Instant::now();
+            loop {
+                let stop = tokio::select! {
+                    biased;
+                    _ = &mut stopped => true,
+                    _ = sleep(Duration::from_millis(1)) => false,
+                };
+                longest_gap = longest_gap.max(last.elapsed());
+                last = Instant::now();
+                if stop {
+                    return longest_gap;
+                }
+            }
+        });
+        // Let the ticker start, so that a stall is a gap between its ticks.
+        sleep(Duration::from_millis(10)).await;
+
+        let started = Instant::now();
+        tls::config_tls_with(&options(), |_root_store| {
+            std::thread::sleep(LOAD);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let took = started.elapsed();
+        stop.send(()).unwrap();
+        let longest_gap = ticker.await.unwrap();
+
+        // Otherwise the stand-in was never called, and the gap below says nothing.
+        assert!(took >= LOAD, "config_tls did not load the platform's roots");
+        assert!(
+            longest_gap < LOAD / 2,
+            "the runtime stalled for {longest_gap:?}"
+        );
+    }
+
     fn options() -> ConnectorOptions {
         ConnectorOptions {
             tls_required: false,
