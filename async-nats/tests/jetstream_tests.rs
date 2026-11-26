@@ -1580,6 +1580,77 @@ mod jetstream {
         assert_eq!(first.payload.as_ref(), b"after");
     }
 
+    #[tokio::test]
+    async fn pull_ordered_recreate_preserves_new_start_cursor() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("events", "historical".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        let consumer = stream
+            .create_consumer(pull::OrderedConfig {
+                deliver_policy: consumer::DeliverPolicy::New,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let name = consumer.cached_info().name.clone();
+
+        let pending = context
+            .publish("events", "before-recreate".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(pending.sequence, 2);
+        let status = stream.consumer_info(&name).await.unwrap();
+        assert_eq!(status.delivered.consumer_sequence, 0);
+        assert_eq!(status.num_pending, 1);
+        stream.delete_consumer(&name).await.unwrap();
+
+        let mut messages = consumer.messages().await.unwrap();
+        let next = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(15), messages.next())
+                .await
+                .expect("no delivery after consumer reset")
+                .unwrap()
+                .unwrap()
+        });
+        let replacement = format!("{name}_1");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while stream.consumer_info(&replacement).await.is_err() {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("ordered consumer was not recreated");
+        let after = context
+            .publish("events", "after-recreate".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(after.sequence, 3);
+
+        let first = next.await.unwrap();
+        assert_eq!(first.info().unwrap().stream_sequence, 2);
+        assert_eq!(first.payload.as_ref(), b"before-recreate");
+    }
+
     // Next consumer CREATE or DELETE sent by a client with the "ORDERED" inbox
     // prefix, as (op, consumer name).
     async fn next_ordered_request(requests: &mut async_nats::Subscriber) -> (String, String) {

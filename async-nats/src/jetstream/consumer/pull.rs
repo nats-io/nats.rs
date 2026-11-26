@@ -560,6 +560,14 @@ impl Consumer<OrderedConfig> {
         };
         let stream = Stream::stream(ordered_batch_config(&self.info), &config).await?;
 
+        let mut recreate_config = self.config;
+        if recreate_config.deliver_policy == DeliverPolicy::New {
+            // The server has already selected the starting sequence for this consumer.
+            recreate_config.deliver_policy = DeliverPolicy::ByStartSequence {
+                start_sequence: self.info.delivered.stream_sequence + 1,
+            };
+        }
+
         Ok(Ordered {
             consumer_sequence: 0,
             stream_sequence: 0,
@@ -570,7 +578,7 @@ impl Consumer<OrderedConfig> {
             consumer_name: self.info.name.clone(),
             name_prefix: self.info.name.clone(),
             serial: 0,
-            consumer: self.config,
+            consumer: recreate_config,
             stream: Some(stream),
             stream_name: self.info.stream_name.clone(),
         })
