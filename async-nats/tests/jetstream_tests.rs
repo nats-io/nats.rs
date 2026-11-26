@@ -1521,6 +1521,65 @@ mod jetstream {
         }
     }
 
+    #[tokio::test]
+    async fn pull_ordered_recreate_preserves_start_sequence_before_first_delivery() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        context
+            .publish("events", "before".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        let consumer = stream
+            .create_consumer(pull::OrderedConfig {
+                deliver_policy: consumer::DeliverPolicy::ByStartSequence { start_sequence: 2 },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let name = consumer.cached_info().name.clone();
+        let mut messages = consumer.messages().await.unwrap();
+        let next = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(10), messages.next())
+                .await
+                .expect("no delivery after consumer reset")
+                .unwrap()
+                .unwrap()
+        });
+
+        // Wait for the server to accept a pull before deleting the consumer.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while stream.consumer_info(&name).await.unwrap().num_waiting == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("no pull request pending");
+        stream.delete_consumer(&name).await.unwrap();
+        context
+            .publish("events", "after".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let first = next.await.unwrap();
+        assert_eq!(first.info().unwrap().stream_sequence, 2);
+        assert_eq!(first.payload.as_ref(), b"after");
+    }
+
     // Next consumer CREATE or DELETE sent by a client with the "ORDERED" inbox
     // prefix, as (op, consumer name).
     async fn next_ordered_request(requests: &mut async_nats::Subscriber) -> (String, String) {

@@ -2957,13 +2957,11 @@ async fn recreate_consumer_stream(
         .await
         .ok();
 
-    let deliver_policy = {
-        if sequence == 0 {
-            DeliverPolicy::All
-        } else {
-            DeliverPolicy::ByStartSequence {
-                start_sequence: sequence + 1,
-            }
+    let deliver_policy = if sequence == 0 {
+        config.deliver_policy
+    } else {
+        DeliverPolicy::ByStartSequence {
+            start_sequence: sequence + 1,
         }
     };
     trace!("create the new ordered consumer for sequence {}", sequence);
