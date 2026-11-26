@@ -177,6 +177,69 @@ mod client {
         assert!(subscription.next().await.is_some());
     }
 
+    // Every attempt without roots of the user's loads the platform's roots, the first connect
+    // and each retry alike. Loading them reads files or the keychain, which must not stall the
+    // runtime: a task on a current-thread runtime keeps running while the client retries a
+    // server the platform's roots do not trust. Where the load is fast this cannot tell; the
+    // unit test of config_tls stands in a slow one.
+    #[cfg(feature = "native-certs")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_attempts_load_the_platform_roots_off_the_runtime_thread() {
+        use std::time::Instant;
+
+        const ATTEMPTS: usize = 3;
+        let server = nats_server::run_server("tests/configs/tls.conf");
+        // Before the ticker starts: client_url() blocks while it waits for the server.
+        let url = server.client_url();
+
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let ticker = tokio::spawn(async move {
+            let mut longest_gap = Duration::ZERO;
+            let mut last = Instant::now();
+            loop {
+                let stop = tokio::select! {
+                    biased;
+                    _ = &mut stopped => true,
+                    _ = tokio::time::sleep(Duration::from_millis(1)) => false,
+                };
+                longest_gap = longest_gap.max(last.elapsed());
+                last = Instant::now();
+                if stop {
+                    return longest_gap;
+                }
+            }
+        });
+        // Let the ticker start, so that a stall is a gap between its ticks.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let (attempt_tx, mut attempt) = tokio::sync::watch::channel(0);
+        let _client = async_nats::ConnectOptions::new()
+            .retry_on_initial_connect()
+            .reconnect_delay_callback(move |attempt| {
+                attempt_tx.send_replace(attempt);
+                Duration::from_millis(10)
+            })
+            .connect(url)
+            .await
+            .unwrap();
+        // The callback is called before each attempt, so ATTEMPTS attempts have failed once
+        // it is called for the next one.
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            attempt.wait_for(|&attempt| attempt > ATTEMPTS),
+        )
+        .await
+        .expect("the client did not retry")
+        .unwrap();
+        stop.send(()).unwrap();
+        let longest_gap = ticker.await.unwrap();
+
+        assert!(
+            longest_gap < Duration::from_millis(100),
+            "the runtime stalled for {longest_gap:?}"
+        );
+    }
+
     #[tokio::test]
     async fn tls_first() {
         let _server =

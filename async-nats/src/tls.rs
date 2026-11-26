@@ -98,17 +98,32 @@ fn add_native_roots(_root_store: &mut RootCertStore) -> io::Result<()> {
 }
 
 pub(crate) async fn config_tls(options: &ConnectorOptions) -> io::Result<ClientConfig> {
+    config_tls_with(options, add_native_roots).await
+}
+
+/// `config_tls` with the function that adds the platform's roots as a parameter, so that tests
+/// can stand in a slow one.
+pub(crate) async fn config_tls_with(
+    options: &ConnectorOptions,
+    add_platform_roots: fn(&mut RootCertStore) -> io::Result<()>,
+) -> io::Result<ClientConfig> {
     // use provided ClientConfig or built it from options.
     let tls_config = {
         if let Some(config) = &options.tls_client_config {
             // The user's config brings its own roots, so the platform's are not loaded.
             Ok(config.to_owned())
         } else {
-            let mut root_store = RootCertStore::empty();
-            // Fall back on the platform's roots only when the user gave none.
-            if needs_platform_roots(options) {
-                add_native_roots(&mut root_store)?;
-            }
+            // Fall back on the platform's roots only when the user gave none. Loading them reads
+            // files or the keychain, so it runs on the blocking pool.
+            let mut root_store = if needs_platform_roots(options) {
+                tokio::task::spawn_blocking(move || {
+                    let mut root_store = RootCertStore::empty();
+                    add_platform_roots(&mut root_store).map(|()| root_store)
+                })
+                .await??
+            } else {
+                RootCertStore::empty()
+            };
             // Include user-provided certificates.
             for cafile in &options.certificates {
                 let trust_anchors = load_certs(cafile.to_owned())
