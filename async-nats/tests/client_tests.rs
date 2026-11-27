@@ -1662,6 +1662,81 @@ mod client {
     }
 
     #[tokio::test]
+    async fn drain_fences_do_not_count_as_missed_heartbeats() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        // A server that is slow to answer once the drains start: it holds every PONG for
+        // one and a half ping intervals, which a connection with no drains in flight
+        // tolerates.
+        let ping_interval = Duration::from_millis(300);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _peer) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let info = "INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"max_payload\":1048576}\r\n";
+            write.write_all(info.as_bytes()).await.unwrap();
+            let mut lines = BufReader::new(read).lines();
+            let (mut release, mut held_pongs) = (None, 0);
+            loop {
+                let deadline = release
+                    .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(3600));
+                tokio::select! {
+                    line = lines.next_line() => {
+                        let Some(line) = line.unwrap() else { break };
+                        match line.split_whitespace().next() {
+                            Some("PING") if release.is_some() => held_pongs += 1,
+                            Some("PING") => write.write_all(b"PONG\r\n").await.unwrap(),
+                            Some("UNSUB") if release.is_none() => {
+                                release = Some(tokio::time::Instant::now() + ping_interval * 3 / 2);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = tokio::time::sleep_until(deadline), if release.is_some() => {
+                        for _ in 0..std::mem::take(&mut held_pongs) {
+                            write.write_all(b"PONG\r\n").await.unwrap();
+                        }
+                        release = Some(tokio::time::Instant::now() + Duration::from_secs(3600));
+                    }
+                }
+            }
+        });
+
+        let (disconnected, mut on_disconnect) = tokio::sync::mpsc::unbounded_channel();
+        let client = async_nats::ConnectOptions::new()
+            .ping_interval(ping_interval)
+            .event_callback(move |event| {
+                let disconnected = disconnected.clone();
+                async move {
+                    if let async_nats::Event::Disconnected = event {
+                        disconnected.send(()).ok();
+                    }
+                }
+            })
+            .connect(format!("nats://{addr}"))
+            .await
+            .unwrap();
+        let mut first = client.subscribe("first").await.unwrap();
+        let mut second = client.subscribe("second").await.unwrap();
+        client.flush().await.unwrap();
+        first.drain().await.unwrap();
+        second.drain().await.unwrap();
+
+        for sub in [&mut first, &mut second] {
+            let ended = tokio::time::timeout(Duration::from_secs(5), sub.next())
+                .await
+                .expect("the drained subscription ends at its PONG");
+            assert!(ended.is_none());
+        }
+        assert!(
+            on_disconnect.try_recv().is_err(),
+            "drain PINGs counted as missed heartbeats and disconnected the client"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn drain_client_closes_when_disconnected_before_the_pong() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

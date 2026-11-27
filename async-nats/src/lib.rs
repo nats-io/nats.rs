@@ -575,10 +575,11 @@ pub(crate) struct ConnectionHandler {
     should_reconnect: bool,
     flush_observers: Vec<oneshot::Sender<()>>,
     is_draining: bool,
-    // One entry per PING in flight, holding the subscriptions it drains: the server answers
-    // PINGs in order, so a drained subscription ends at the PONG that follows its UNSUB, once
-    // every message the server routed to it before the UNSUB has arrived.
-    drain_pings: VecDeque<Vec<u64>>,
+    // One entry per PING in flight, in order: `None` for a heartbeat, which counts against
+    // MAX_PENDING_PINGS, or the subscriptions a drain fences. The server answers PINGs in
+    // order, so a drained subscription ends at the PONG that follows its UNSUB, once every
+    // message the server routed to it before the UNSUB has arrived.
+    drain_pings: VecDeque<Option<Vec<u64>>>,
 }
 
 impl ConnectionHandler {
@@ -639,7 +640,7 @@ impl ConnectionHandler {
                     Poll::Ready(ExitReason::Disconnected(None))
                 } else {
                     self.handler.connection.enqueue_write_op(&ClientOp::Ping);
-                    self.handler.drain_pings.push_back(Vec::new());
+                    self.handler.drain_pings.push_back(None);
 
                     Poll::Pending
                 }
@@ -688,7 +689,7 @@ impl ConnectionHandler {
                 }
 
                 if self.handler.is_draining
-                    && self.handler.drain_pings.iter().all(|sids| sids.is_empty())
+                    && self.handler.drain_pings.iter().flatten().all(Vec::is_empty)
                 {
                     // The entire connection is draining. This means we flushed outgoing messages in the previous
                     // call to this fn, we handled any remaining messages from the server in the loop above, and
@@ -850,9 +851,15 @@ impl ConnectionHandler {
             }
             ServerOp::Pong => {
                 debug!("received PONG");
-                self.pending_pings = self.pending_pings.saturating_sub(1);
-                for sid in self.drain_pings.pop_front().unwrap_or_default() {
-                    self.subscriptions.remove(&sid);
+                match self.drain_pings.pop_front() {
+                    Some(Some(drained)) => {
+                        for sid in drained {
+                            self.subscriptions.remove(&sid);
+                        }
+                    }
+                    Some(None) | None => {
+                        self.pending_pings = self.pending_pings.saturating_sub(1);
+                    }
                 }
             }
             ServerOp::Error(error) => {
@@ -1003,8 +1010,7 @@ impl ConnectionHandler {
                     }
                 }
                 self.connection.enqueue_write_op(&ClientOp::Ping);
-                self.pending_pings += 1;
-                self.drain_pings.push_back(drained);
+                self.drain_pings.push_back(Some(drained));
             }
             Command::Subscribe {
                 sid,
@@ -1118,7 +1124,7 @@ impl ConnectionHandler {
 
     async fn handle_disconnect(&mut self) -> Result<(), ConnectError> {
         self.pending_pings = 0;
-        for sid in self.drain_pings.drain(..).flatten() {
+        for sid in self.drain_pings.drain(..).flatten().flatten() {
             self.subscriptions.remove(&sid);
         }
         self.connector.events_tx.try_send(Event::Disconnected).ok();
