@@ -514,6 +514,14 @@ impl Consumer<OrderedConfig> {
     /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
     /// sees mismatch.
     ///
+    /// If recovery could replay messages skipped by a multi-message `LastPerSubject`
+    /// snapshot, the stream yields [OrderedErrorKind::Recreate] and ends. For a named
+    /// create response with multiple pending messages, the client checks the stream's
+    /// last sequence to determine whether every sequence after the cursor was pending.
+    /// If the stream information is unavailable or the range could contain gaps,
+    /// the guard stays active. Handles returned by a lookup resume from the reported
+    /// stream sequence.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -553,14 +561,31 @@ impl Consumer<OrderedConfig> {
     /// # }
     /// ```
     pub async fn messages(self) -> Result<Ordered, StreamError> {
-        let config = Consumer {
-            config: self.config.clone().into(),
-            context: self.context.clone(),
-            info: self.info.clone(),
-        };
+        let config = Consumer::new(
+            self.config.clone().into(),
+            self.info.clone(),
+            self.context.clone(),
+        );
         let stream = Stream::stream(ordered_batch_config(&self.info), &config).await?;
 
+        let mut recreate_config = self.config;
+        // LastPerSubject can start with a sparse set of stream sequences. Use the
+        // bound captured before later information refreshes.
+        let pending_snapshot = match (recreate_config.deliver_policy, self.pending_snapshot_bound) {
+            (DeliverPolicy::LastPerSubject, Some(pending)) if pending > 1 => pending,
+            _ => 0,
+        };
+        if matches!(
+            recreate_config.deliver_policy,
+            DeliverPolicy::New | DeliverPolicy::Last | DeliverPolicy::LastPerSubject
+        ) {
+            recreate_config.deliver_policy = DeliverPolicy::ByStartSequence {
+                start_sequence: self.info.delivered.stream_sequence + 1,
+            };
+        }
+
         Ok(Ordered {
+            pending_snapshot,
             consumer_sequence: 0,
             stream_sequence: 0,
             missed_heartbeats: false,
@@ -570,7 +595,7 @@ impl Consumer<OrderedConfig> {
             consumer_name: self.info.name.clone(),
             name_prefix: self.info.name.clone(),
             serial: 0,
-            consumer: self.config,
+            consumer: recreate_config,
             stream: Some(stream),
             stream_name: self.info.stream_name.clone(),
         })
@@ -681,6 +706,10 @@ impl From<OrderedConfig> for Config {
 }
 
 impl FromConsumer for OrderedConfig {
+    fn is_ordered_pull() -> bool {
+        true
+    }
+
     fn try_from_consumer_config(
         config: crate::jetstream::consumer::Config,
     ) -> Result<Self, crate::Error>
@@ -753,6 +782,7 @@ impl IntoConsumerConfig for OrderedConfig {
 }
 
 pub struct Ordered {
+    pending_snapshot: u64,
     context: Context,
     stream_name: String,
     consumer: OrderedConfig,
@@ -802,6 +832,10 @@ impl futures_util::Stream for Ordered {
                                 recreate = true;
                                 self.consumer_sequence = 0;
                             } else {
+                                // Removed or expired snapshot entries can reduce the server's
+                                // pending count without being delivered.
+                                self.pending_snapshot =
+                                    self.pending_snapshot.saturating_sub(1).min(info.pending);
                                 self.stream_sequence = info.stream_sequence;
                                 self.consumer_sequence = info.consumer_sequence;
                                 self.limit_exceeded = false;
@@ -847,6 +881,15 @@ impl futures_util::Stream for Ordered {
         }
         // Recreate consumer if needed
         if recreate {
+            if self.pending_snapshot > 0 {
+                if let Some(stream) = self.stream.as_mut() {
+                    stream.terminate();
+                }
+                return Poll::Ready(Some(Err(OrderedError::with_source(
+                    OrderedErrorKind::Recreate,
+                    "the original LastPerSubject snapshot was interrupted before all its messages were delivered",
+                ))));
+            }
             self.stream = None;
             self.serial += 1;
             let name = format!("{}_{}", self.name_prefix, self.serial);
@@ -2957,13 +3000,11 @@ async fn recreate_consumer_stream(
         .await
         .ok();
 
-    let deliver_policy = {
-        if sequence == 0 {
-            DeliverPolicy::All
-        } else {
-            DeliverPolicy::ByStartSequence {
-                start_sequence: sequence + 1,
-            }
+    let deliver_policy = if sequence == 0 {
+        config.deliver_policy
+    } else {
+        DeliverPolicy::ByStartSequence {
+            start_sequence: sequence + 1,
         }
     };
     trace!("create the new ordered consumer for sequence {}", sequence);
@@ -2981,11 +3022,7 @@ async fn recreate_consumer_stream(
         })?;
 
     let batch_config = ordered_batch_config(&consumer.info);
-    let config = Consumer {
-        config: config.clone().into(),
-        context: context.clone(),
-        info: consumer.info,
-    };
+    let config = Consumer::new(config.into(), consumer.info, context);
 
     trace!("create iterator");
     let stream = tokio::time::timeout(

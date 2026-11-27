@@ -46,15 +46,25 @@ pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
     pub(crate) info: Info,
+    // Upper bound on the original snapshot, kept across information refreshes.
+    pending_snapshot_bound: Option<u64>,
 }
 
 impl<T: IntoConsumerConfig> Consumer<T> {
     pub fn new(config: T, info: consumer::Info, context: Context) -> Self {
         Self {
             config,
+            pending_snapshot_bound: None,
             info,
             context,
         }
+    }
+
+    pub(crate) fn with_pending_snapshot_bound(mut self) -> Self {
+        if self.info.delivered.consumer_sequence == 0 {
+            self.pending_snapshot_bound = Some(self.info.num_pending);
+        }
+        self
     }
 }
 impl<T: IntoConsumerConfig> Consumer<T> {
@@ -204,6 +214,14 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 /// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
+    #[doc(hidden)]
+    fn is_ordered_pull() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
     fn try_from_consumer_config(
         config: crate::jetstream::consumer::Config,
     ) -> Result<Self, crate::Error>
