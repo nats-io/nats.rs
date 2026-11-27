@@ -46,23 +46,23 @@ pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
     pub(crate) info: Info,
-    // Captured from the create response before later arrivals enter the pending count.
-    initial_num_pending: Option<u64>,
+    // Upper bound on the original snapshot, kept across information refreshes.
+    pending_snapshot_bound: Option<u64>,
 }
 
 impl<T: IntoConsumerConfig> Consumer<T> {
     pub fn new(config: T, info: consumer::Info, context: Context) -> Self {
         Self {
             config,
-            initial_num_pending: None,
+            pending_snapshot_bound: None,
             info,
             context,
         }
     }
 
-    pub(crate) fn with_initial_pending(mut self) -> Self {
+    pub(crate) fn with_pending_snapshot_bound(mut self) -> Self {
         if self.info.delivered.consumer_sequence == 0 {
-            self.initial_num_pending = Some(self.info.num_pending);
+            self.pending_snapshot_bound = Some(self.info.num_pending);
         }
         self
     }

@@ -1754,6 +1754,48 @@ mod jetstream {
     }
 
     #[tokio::test]
+    async fn pull_ordered_last_per_subject_reopened_sparse_snapshot() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // The snapshot selects 1 and 3. A sequence replay would also return 2.
+        for subject in ["events.a", "events.b", "events.b"] {
+            context
+                .publish(subject, "history".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let config = pull::OrderedConfig {
+            name: Some("ordered".into()),
+            filter_subject: "events.*".into(),
+            deliver_policy: DeliverPolicy::LastPerSubject,
+            ..Default::default()
+        };
+        stream.create_consumer(config.clone()).await.unwrap();
+        let reopened = stream.create_consumer(config).await.unwrap();
+        assert_eq!(reopened.cached_info().num_pending, 2);
+        stream.delete_consumer("ordered").await.unwrap();
+        let mut messages = reopened.messages().await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(10), messages.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind(), pull::OrderedErrorKind::Recreate);
+    }
+
+    #[tokio::test]
     async fn pull_ordered_last_per_subject_reopened_consumer() {
         let server = nats_server::run_server("tests/configs/jetstream.conf");
         let client = async_nats::connect(server.client_url()).await.unwrap();
@@ -1775,7 +1817,13 @@ mod jetstream {
             deliver_policy: DeliverPolicy::LastPerSubject,
             ..Default::default()
         };
-        for name in ["lookup", "context_lookup", "get_or_create"] {
+        for name in [
+            "lookup",
+            "context_lookup",
+            "get_or_create",
+            "create",
+            "strict",
+        ] {
             let consumer = stream.create_consumer(config(name)).await.unwrap();
             assert_eq!(consumer.cached_info().num_pending, 0);
         }
@@ -1788,7 +1836,7 @@ mod jetstream {
                 .unwrap();
         }
 
-        let reopened: [OrderedPullConsumer; 3] = [
+        let reopened = [
             stream.get_consumer("lookup").await.unwrap(),
             context
                 .get_consumer_from_stream("context_lookup", "events")
@@ -1796,6 +1844,12 @@ mod jetstream {
                 .unwrap(),
             stream
                 .get_or_create_consumer("get_or_create", config("get_or_create"))
+                .await
+                .unwrap(),
+            stream.create_consumer(config("create")).await.unwrap(),
+            #[cfg(feature = "server_2_10")]
+            stream
+                .create_consumer_strict(config("strict"))
                 .await
                 .unwrap(),
         ];

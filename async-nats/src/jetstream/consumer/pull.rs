@@ -514,10 +514,13 @@ impl Consumer<OrderedConfig> {
     /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
     /// sees mismatch.
     ///
-    /// If recovery interrupts a known multi-message `LastPerSubject` snapshot,
-    /// the stream yields [OrderedErrorKind::Recreate] and ends. A retrieved consumer
-    /// resumes from the reported stream sequence when the original snapshot size
-    /// is unavailable.
+    /// If recovery could replay messages skipped by a multi-message `LastPerSubject`
+    /// snapshot, the stream yields [OrderedErrorKind::Recreate] and ends. For a named
+    /// create response with multiple pending messages, the client checks the stream's
+    /// last sequence to determine whether every sequence after the cursor was pending.
+    /// If the stream information is unavailable or the range could contain gaps,
+    /// the guard stays active. Handles returned by a lookup resume from the reported
+    /// stream sequence.
     ///
     /// # Example
     ///
@@ -567,8 +570,8 @@ impl Consumer<OrderedConfig> {
 
         let mut recreate_config = self.config;
         // LastPerSubject can start with a sparse set of stream sequences. Use the
-        // initial count to track that snapshot independently of new arrivals.
-        let pending_snapshot = match (recreate_config.deliver_policy, self.initial_num_pending) {
+        // bound captured before later information refreshes.
+        let pending_snapshot = match (recreate_config.deliver_policy, self.pending_snapshot_bound) {
             (DeliverPolicy::LastPerSubject, Some(pending)) if pending > 1 => pending,
             _ => 0,
         };

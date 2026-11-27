@@ -1554,17 +1554,17 @@ impl Context {
     ) -> Result<Consumer<C>, ConsumerError> {
         let config = config.into_consumer_config();
 
+        let name = config.name.as_ref().or(config.durable_name.as_ref());
+        let named_last_per_subject = name.is_some()
+            && config.deliver_subject.is_none()
+            && config.deliver_policy == consumer::DeliverPolicy::LastPerSubject;
         let subject = {
             let filter = if config.filter_subject.is_empty() {
                 "".to_string()
             } else {
                 format!(".{}", config.filter_subject)
             };
-            config
-                .name
-                .as_ref()
-                .or(config.durable_name.as_ref())
-                .map(|name| format!("CONSUMER.CREATE.{}.{}{}", stream.as_ref(), name, filter))
+            name.map(|name| format!("CONSUMER.CREATE.{}.{}{}", stream.as_ref(), name, filter))
                 .unwrap_or_else(|| format!("CONSUMER.CREATE.{}", stream.as_ref()))
         };
 
@@ -1584,7 +1584,22 @@ impl Context {
                 if matches!(action, ConsumerAction::Update) {
                     return Ok(consumer);
                 }
-                Ok(consumer.with_initial_pending())
+                // Named CREATE is idempotent. Its pending count can include live arrivals.
+                // If every stream sequence after the cursor was pending at the time of
+                // the reply, replay from that cursor cannot add a superseded message.
+                if named_last_per_subject
+                    && consumer.info.delivered.consumer_sequence == 0
+                    && consumer.info.num_pending > 1
+                {
+                    if let Ok(stream) = self.get_stream(stream.as_ref()).await {
+                        let cursor = consumer.info.delivered.stream_sequence;
+                        let tail = stream.cached_info().state.last_sequence;
+                        if tail.checked_sub(cursor) == Some(consumer.info.num_pending) {
+                            return Ok(consumer);
+                        }
+                    }
+                }
+                Ok(consumer.with_pending_snapshot_bound())
             }
         }
     }
