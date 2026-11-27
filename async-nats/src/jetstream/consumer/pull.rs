@@ -706,6 +706,10 @@ impl From<OrderedConfig> for Config {
 }
 
 impl FromConsumer for OrderedConfig {
+    fn is_ordered_pull() -> bool {
+        true
+    }
+
     fn try_from_consumer_config(
         config: crate::jetstream::consumer::Config,
     ) -> Result<Self, crate::Error>

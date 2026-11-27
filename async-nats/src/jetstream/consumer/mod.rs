@@ -214,6 +214,14 @@ impl<T: IntoConsumerConfig> Consumer<T> {
 /// [Push][crate::jetstream::consumer::push::Config] config. It validates if given config is
 /// a valid target one.
 pub trait FromConsumer {
+    #[doc(hidden)]
+    fn is_ordered_pull() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
     fn try_from_consumer_config(
         config: crate::jetstream::consumer::Config,
     ) -> Result<Self, crate::Error>
