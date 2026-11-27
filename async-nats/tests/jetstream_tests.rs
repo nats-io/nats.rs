@@ -1786,9 +1786,25 @@ mod jetstream {
             deliver_policy: consumer::DeliverPolicy::LastPerSubject,
             ..Default::default()
         };
-        let consumer = stream.create_consumer(config.clone()).await.unwrap();
+        let mut consumer = stream.create_consumer(config.clone()).await.unwrap();
         let control = stream.create_consumer(config).await.unwrap();
         let name = consumer.cached_info().name.clone();
+        let initial_pending = consumer.cached_info().num_pending;
+        assert_eq!(initial_pending, snapshot.len() as u64);
+
+        for _ in 0..2 {
+            context
+                .publish("events.a", "new".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        // A refresh includes live messages in addition to the original snapshot.
+        assert_eq!(
+            consumer.info().await.unwrap().num_pending,
+            initial_pending + 2
+        );
         let mut recovered = consumer.messages().await.unwrap();
 
         tokio::time::timeout(Duration::from_secs(15), async {
@@ -1798,14 +1814,6 @@ mod jetstream {
                     assert_eq!(message.info().unwrap().stream_sequence, *sequence);
                 }
                 stream.delete_consumer(&name).await.unwrap();
-            }
-            for _ in 0..2 {
-                context
-                    .publish("events.a", "new".into())
-                    .await
-                    .unwrap()
-                    .await
-                    .unwrap();
             }
             if read_before_delete == 0 {
                 assert_eq!(

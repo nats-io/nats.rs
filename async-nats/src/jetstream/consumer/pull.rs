@@ -557,18 +557,20 @@ impl Consumer<OrderedConfig> {
     /// # }
     /// ```
     pub async fn messages(self) -> Result<Ordered, StreamError> {
-        let config = Consumer {
-            config: self.config.clone().into(),
-            context: self.context.clone(),
-            info: self.info.clone(),
-        };
+        let config = Consumer::new(
+            self.config.clone().into(),
+            self.info.clone(),
+            self.context.clone(),
+        );
         let stream = Stream::stream(ordered_batch_config(&self.info), &config).await?;
 
         let mut recreate_config = self.config;
-        // LastPerSubject can start with a sparse set of stream sequences. ConsumerInfo
-        // exposes the first position and pending count, but not the per-subject sequence list.
+        // LastPerSubject can start with a sparse set of stream sequences. Use the
+        // initial count to track that snapshot independently of new arrivals.
         let pending_snapshot = match recreate_config.deliver_policy {
-            DeliverPolicy::LastPerSubject if self.info.num_pending > 1 => self.info.num_pending,
+            DeliverPolicy::LastPerSubject if self.initial_num_pending > 1 => {
+                self.initial_num_pending
+            }
             _ => 0,
         };
         if matches!(
@@ -3011,11 +3013,7 @@ async fn recreate_consumer_stream(
         })?;
 
     let batch_config = ordered_batch_config(&consumer.info);
-    let config = Consumer {
-        config: config.clone().into(),
-        context: context.clone(),
-        info: consumer.info,
-    };
+    let config = Consumer::new(config.into(), consumer.info, context);
 
     trace!("create iterator");
     let stream = tokio::time::timeout(
