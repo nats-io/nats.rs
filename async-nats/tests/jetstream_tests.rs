@@ -1753,6 +1753,177 @@ mod jetstream {
         .await;
     }
 
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_reopened_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
+                storage: StorageType::Memory,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let config = |name: &str| pull::OrderedConfig {
+            name: Some(name.into()),
+            max_batch: 1,
+            filter_subject: "events.*".into(),
+            deliver_policy: DeliverPolicy::LastPerSubject,
+            ..Default::default()
+        };
+        for name in ["lookup", "context_lookup", "get_or_create"] {
+            let consumer = stream.create_consumer(config(name)).await.unwrap();
+            assert_eq!(consumer.cached_info().num_pending, 0);
+        }
+        for subject in ["events.a", "events.b"] {
+            context
+                .publish(subject, "live".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+
+        let reopened: [OrderedPullConsumer; 3] = [
+            stream.get_consumer("lookup").await.unwrap(),
+            context
+                .get_consumer_from_stream("context_lookup", "events")
+                .await
+                .unwrap(),
+            stream
+                .get_or_create_consumer("get_or_create", config("get_or_create"))
+                .await
+                .unwrap(),
+        ];
+        for consumer in reopened {
+            assert_eq!(consumer.cached_info().num_pending, 2);
+            let name = consumer.cached_info().name.clone();
+            stream.delete_consumer(&name).await.unwrap();
+            let mut messages = consumer.messages().await.unwrap();
+            for sequence in [1, 2] {
+                let message = tokio::time::timeout(Duration::from_secs(10), messages.next())
+                    .await
+                    .expect("no delivery after consumer reset")
+                    .unwrap()
+                    .unwrap_or_else(|error| panic!("{name} failed to recover: {error}"));
+                assert_eq!(message.info().unwrap().stream_sequence, sequence);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_deleted_history() {
+        for remove_first in [false, true] {
+            check_last_per_subject_removed_history(false, remove_first).await;
+        }
+    }
+
+    #[cfg(feature = "server_2_11")]
+    #[tokio::test]
+    async fn pull_ordered_last_per_subject_expired_history() {
+        for remove_first in [false, true] {
+            check_last_per_subject_removed_history(true, remove_first).await;
+        }
+    }
+
+    async fn check_last_per_subject_removed_history(expire: bool, remove_first: bool) {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+        let stream = context
+            .create_stream(stream::Config {
+                name: "events".into(),
+                subjects: vec!["events.*".into()],
+                storage: StorageType::Memory,
+                #[cfg(feature = "server_2_11")]
+                allow_message_ttl: expire,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let historical = PublishMessage::build().payload("removed".into());
+        #[cfg(feature = "server_2_11")]
+        let historical = if expire {
+            historical.ttl(Duration::from_secs(3))
+        } else {
+            historical
+        };
+        let mut history = [
+            ("events.a", PublishMessage::build().payload("kept".into())),
+            ("events.b", historical),
+        ];
+        if remove_first {
+            history.swap(0, 1);
+        }
+        for (subject, message) in history {
+            context
+                .send_publish(subject, message)
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let (kept, removed) = if remove_first { (2, 1) } else { (1, 2) };
+        let consumer = stream
+            .create_consumer(pull::OrderedConfig {
+                max_batch: 1,
+                // A skipped first entry can take another pull before the server
+                // delivers the remaining entry.
+                max_expires: Duration::from_secs(1),
+                filter_subject: "events.*".into(),
+                deliver_policy: DeliverPolicy::LastPerSubject,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(consumer.cached_info().num_pending, 2);
+        let name = consumer.cached_info().name.clone();
+
+        if expire {
+            let mut stream = stream.clone();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while stream.info().await.unwrap().state.messages != 1 {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("historical message did not expire");
+        } else {
+            assert!(stream.delete_message(removed).await.unwrap());
+        }
+        assert_eq!(stream.get_raw_message(kept).await.unwrap().sequence, kept);
+
+        let mut messages = consumer.messages().await.unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(10), messages.next())
+            .await
+            .expect("the remaining historical message was not delivered")
+            .unwrap()
+            .unwrap();
+        let info = message.info().unwrap();
+        assert_eq!(info.stream_sequence, kept);
+        assert_eq!(info.pending, 0);
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            stream.delete_consumer(&name).await.unwrap();
+            let live = context
+                .publish("events.c", "live".into())
+                .await
+                .unwrap()
+                .await
+                .unwrap()
+                .sequence;
+            let recovered = messages.next().await.unwrap().unwrap();
+            assert_eq!(recovered.info().unwrap().stream_sequence, live);
+        })
+        .await
+        .expect("consumer recovery timed out");
+    }
+
     async fn check_last_per_subject_recovery(
         initial_subjects: &[&'static str],
         snapshot: &[u64],

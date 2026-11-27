@@ -1576,12 +1576,16 @@ impl Context {
             .await?
         {
             Response::Err { error } => Err(ConsumerError::new(ConsumerErrorKind::JetStream(error))),
-            Response::Ok::<consumer::Info>(info) => Ok(Consumer::new(
-                FromConsumer::try_from_consumer_config(info.clone().config)
-                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?,
-                info,
-                self.clone(),
-            )),
+            Response::Ok::<consumer::Info>(info) => {
+                let config = FromConsumer::try_from_consumer_config(info.config.clone())
+                    .map_err(|err| ConsumerError::with_source(ConsumerErrorKind::Other, err))?;
+                let consumer = Consumer::new(config, info, self.clone());
+                #[cfg(feature = "server_2_10")]
+                if matches!(action, ConsumerAction::Update) {
+                    return Ok(consumer);
+                }
+                Ok(consumer.with_initial_pending())
+            }
         }
     }
 

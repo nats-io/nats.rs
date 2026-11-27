@@ -514,9 +514,10 @@ impl Consumer<OrderedConfig> {
     /// Stream. It does not use acks, instead it tracks sequences and recreate itself whenever it
     /// sees mismatch.
     ///
-    /// If recovery interrupts a pending multi-message `LastPerSubject` snapshot,
-    /// the stream yields [OrderedErrorKind::Recreate] and ends. The server reports
-    /// the starting cursor but does not expose the individual snapshot sequences.
+    /// If recovery interrupts a known multi-message `LastPerSubject` snapshot,
+    /// the stream yields [OrderedErrorKind::Recreate] and ends. A retrieved consumer
+    /// resumes from the reported stream sequence when the original snapshot size
+    /// is unavailable.
     ///
     /// # Example
     ///
@@ -567,10 +568,8 @@ impl Consumer<OrderedConfig> {
         let mut recreate_config = self.config;
         // LastPerSubject can start with a sparse set of stream sequences. Use the
         // initial count to track that snapshot independently of new arrivals.
-        let pending_snapshot = match recreate_config.deliver_policy {
-            DeliverPolicy::LastPerSubject if self.initial_num_pending > 1 => {
-                self.initial_num_pending
-            }
+        let pending_snapshot = match (recreate_config.deliver_policy, self.initial_num_pending) {
+            (DeliverPolicy::LastPerSubject, Some(pending)) if pending > 1 => pending,
             _ => 0,
         };
         if matches!(
@@ -826,7 +825,10 @@ impl futures_util::Stream for Ordered {
                                 recreate = true;
                                 self.consumer_sequence = 0;
                             } else {
-                                self.pending_snapshot = self.pending_snapshot.saturating_sub(1);
+                                // Removed or expired snapshot entries can reduce the server's
+                                // pending count without being delivered.
+                                self.pending_snapshot =
+                                    self.pending_snapshot.saturating_sub(1).min(info.pending);
                                 self.stream_sequence = info.stream_sequence;
                                 self.consumer_sequence = info.consumer_sequence;
                                 self.limit_exceeded = false;

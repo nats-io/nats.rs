@@ -46,18 +46,25 @@ pub struct Consumer<T: IntoConsumerConfig> {
     pub(crate) context: Context,
     pub(crate) config: T,
     pub(crate) info: Info,
-    // Pending count before a refresh can include later arrivals.
-    initial_num_pending: u64,
+    // Captured from the create response before later arrivals enter the pending count.
+    initial_num_pending: Option<u64>,
 }
 
 impl<T: IntoConsumerConfig> Consumer<T> {
     pub fn new(config: T, info: consumer::Info, context: Context) -> Self {
         Self {
             config,
-            initial_num_pending: info.num_pending,
+            initial_num_pending: None,
             info,
             context,
         }
+    }
+
+    pub(crate) fn with_initial_pending(mut self) -> Self {
+        if self.info.delivered.consumer_sequence == 0 {
+            self.initial_num_pending = Some(self.info.num_pending);
+        }
+        self
     }
 }
 impl<T: IntoConsumerConfig> Consumer<T> {
