@@ -791,6 +791,11 @@ impl ConnectionHandler {
                 recv_buf: &mut recv_buf,
             };
             match process.await {
+                ExitReason::Disconnected(err) if self.is_draining => {
+                    debug!(error = ?err, "disconnected while draining");
+                    self.connector.events_tx.try_send(Event::Closed).ok();
+                    break;
+                }
                 ExitReason::Disconnected(err) => {
                     debug!(error = ?err, "disconnected");
                     if self.handle_disconnect().await.is_err() {

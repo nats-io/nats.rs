@@ -1662,6 +1662,53 @@ mod client {
     }
 
     #[tokio::test]
+    async fn drain_client_closes_when_disconnected_before_the_pong() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        // A server that goes away on the drain's UNSUB instead of answering its PING.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _peer) = listener.accept().await.unwrap();
+            drop(listener);
+            let (read, mut write) = stream.into_split();
+            let info = "INFO {\"server_id\":\"test\",\"version\":\"2.10.0\",\"proto\":1,\"max_payload\":1048576}\r\n";
+            write.write_all(info.as_bytes()).await.unwrap();
+            let mut lines = BufReader::new(read).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.starts_with("UNSUB") {
+                    break;
+                }
+                if line == "PING" {
+                    write.write_all(b"PONG\r\n").await.unwrap();
+                }
+            }
+        });
+
+        let (closed, mut on_close) = tokio::sync::mpsc::unbounded_channel();
+        let client = ConnectOptions::new()
+            .event_callback(move |event| {
+                let closed = closed.clone();
+                async move {
+                    if matches!(event, Event::Closed) {
+                        closed.send(()).ok();
+                    }
+                }
+            })
+            .connect(format!("nats://{addr}"))
+            .await
+            .unwrap();
+        let _sub = client.subscribe("test").await.unwrap();
+        client.flush().await.unwrap();
+        client.drain().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), on_close.recv())
+            .await
+            .expect("a draining client closes instead of reconnecting")
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn drain_client_basic() {
         let server = nats_server::run_basic_server();
         let client = async_nats::connect(server.client_url()).await.unwrap();
