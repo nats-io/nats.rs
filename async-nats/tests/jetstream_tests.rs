@@ -1685,7 +1685,50 @@ mod jetstream {
                 );
             }
             task.abort();
+            // Dropping the messages deletes the current consumer.
+            assert_eq!(
+                next_ordered_request(&mut requests).await,
+                ("DELETE".to_string(), current.clone())
+            );
         }
+    }
+
+    // The delete on drop is queued without a runtime, so it also happens when the messages
+    // are dropped on a thread outside of it.
+    #[tokio::test]
+    async fn push_ordered_dropped_outside_runtime_deletes_consumer() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let mut stream = context
+            .create_stream(stream::Config {
+                name: "events".to_string(),
+                subjects: vec!["events".to_string()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let messages = stream
+            .create_consumer(push::OrderedConfig {
+                deliver_subject: "deliver".to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .messages()
+            .await
+            .unwrap();
+        assert_eq!(stream.info().await.unwrap().state.consumer_count, 1);
+
+        std::thread::spawn(move || drop(messages)).join().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while stream.info().await.unwrap().state.consumer_count > 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("consumer left behind after dropping the messages");
     }
 
     #[tokio::test]

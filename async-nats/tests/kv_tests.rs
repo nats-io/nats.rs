@@ -1904,4 +1904,49 @@ mod kv {
             }
         }
     }
+
+    // Watches, histories and key listings each read through an ordered consumer, which is
+    // deleted when they are dropped instead of being left until its inactive threshold.
+    #[tokio::test]
+    async fn dropped_readers_delete_consumers() {
+        let server = nats_server::run_server("tests/configs/jetstream.conf");
+        let client = async_nats::connect(server.client_url()).await.unwrap();
+        let context = async_nats::jetstream::new(client);
+
+        let kv = context
+            .create_key_value(kv::Config {
+                bucket: "consumers".into(),
+                history: 5,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        kv.put("key", "first".into()).await.unwrap();
+        kv.put("key", "second".into()).await.unwrap();
+
+        let mut stream = context.get_stream("KV_consumers").await.unwrap();
+        let mut watch = kv.watch_with_history(">").await.unwrap();
+        watch.next().await.unwrap().unwrap();
+        let mut history = kv.history("key").await.unwrap();
+        while let Some(entry) = history.next().await {
+            entry.unwrap();
+        }
+        let mut keys = kv.keys().await.unwrap();
+        while let Some(key) = keys.next().await {
+            key.unwrap();
+        }
+        assert_eq!(stream.info().await.unwrap().state.consumer_count, 3);
+
+        // A watch never ends on its own, so dropping it is the only way to stop it.
+        drop(watch);
+        drop(history);
+        drop(keys);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while stream.info().await.unwrap().state.consumer_count > 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("consumers left behind after dropping the readers");
+    }
 }
